@@ -8,7 +8,7 @@ Dessine de la musique dans l'air avec ta webcam. Tu pinces le pouce et l'index p
 
 - Suivi de la main par webcam (MediaPipe Hands, jusqu'à 2 mains). Seuls le pouce et l'index dessinent ; les pincements trop brefs et le crochet de fin de trait sont filtrés.
 - Haut = aigu, bas = grave. 4 gammes (pentatonique mineure, majeure, blues, japonaise) et 12 tonalités.
-- 5 sons synthétisés : synthé rétro, chiptune, nappe douce, pluck, marimba. Batterie optionnelle.
+- 6 sons synthétisés : synthé rétro, synthé glissé (hauteur continue qui suit le trait), chiptune, nappe douce, pluck, marimba. Batterie optionnelle.
 - 5 morceaux modèles avec traces guides en pointillés, score de suivi et bouton « Tracer pour moi ».
 - Couleur des néons et de la barre de lecture au choix.
 - Enregistrement vidéo (MP4 ou WebM selon le navigateur) et export audio WAV de 4 boucles.

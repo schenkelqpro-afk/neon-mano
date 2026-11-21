@@ -370,6 +370,7 @@ const MP_WASM = `https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@${MP_VERSI
 const MP_MODEL = 'https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task';
 
 const STEPS = 32;            // 2 mesures de 16 doubles-croches
+const SUB = 8;               // sous-échantillons par pas pour le synthé glissé
 const GT = 0.10, GB = 0.86;  // haut et bas de la grille des notes (fraction de la hauteur)
 const STORE_KEY = 'neonmano.v1';
 
@@ -437,6 +438,12 @@ function noteRows() {
 let ROWS = noteRows();
 const midiName = (m) => NOTE_NAMES[m % 12] + (Math.floor(m / 12) - 1);
 const midiFreq = (m) => 440 * Math.pow(2, (m - 69) / 12);
+// hauteur continue : rangée fractionnaire, interpolée entre les notes de la gamme
+function yToMidiF(y) {
+  const n = ROWS.length, r = clamp((GB - y) / (GB - GT) * (n - 1), 0, n - 1);
+  const i = Math.min(n - 2, Math.floor(r)), f = r - i;
+  return ROWS[i] + (ROWS[i + 1] - ROWS[i]) * f;
+}
 const yToRow = (y) => clamp(Math.round((GB - y) / (GB - GT) * (ROWS.length - 1)), 0, ROWS.length - 1);
 const rowToY = (r) => GB - r / (ROWS.length - 1) * (GB - GT);
 
@@ -479,7 +486,38 @@ function buildScore(strokes) {
       }
     }
   }
-  return events.map(m => [...m.entries()].slice(0, 6).map(([row, len]) => ({ row, len })));
+  const res = events.map(m => [...m.entries()].slice(0, 6).map(([row, len]) => ({ row, len })));
+  res.glides = buildGlides(strokes);
+  return res;
+}
+// Synthé glissé : chaque passage de la barre sur un trait devient une seule note continue
+// dont la hauteur suit le trait. Résultat indexé par pas : { off (sous-pas), ys (hauteurs) }.
+function buildGlides(strokes) {
+  const N = STEPS * SUB, out = Array.from({ length: STEPS }, () => []);
+  const push = (k0, ys) => { if (out[Math.floor(k0 / SUB)].length < 6) out[Math.floor(k0 / SUB)].push({ off: k0 % SUB, ys }); };
+  for (const st of strokes) {
+    const pts = st.pts;
+    let voices = [], any = false;
+    for (let k = 0; k < N; k++) {
+      const ys = crossings(pts, (k + 0.5) / N);
+      const used = new Array(ys.length).fill(false), next = [];
+      for (const v of voices) {
+        let bi = -1, bd = 0.08;
+        ys.forEach((y, i) => { if (!used[i]) { const d = Math.abs(y - v.ys[v.ys.length - 1]); if (d < bd) { bd = d; bi = i; } } });
+        if (bi >= 0) { used[bi] = true; v.ys.push(ys[bi]); next.push(v); } else push(v.k0, v.ys);
+      }
+      ys.forEach((y, i) => { if (!used[i]) { next.push({ k0: k, ys: [y] }); any = true; } });
+      voices = next;
+    }
+    voices.forEach(v => push(v.k0, v.ys));
+    if (!any) { // tap : courte note fixe
+      let mx = 0, my = 0;
+      for (const p of pts) { mx += p[0]; my += p[1]; }
+      mx /= pts.length; my /= pts.length;
+      push(clamp(Math.floor(mx * N), 0, N - 1), new Array(SUB).fill(my));
+    }
+  }
+  return out;
 }
 let score = buildScore([]);
 let scoreDirty = true, lastScoreAt = 0;
@@ -596,6 +634,34 @@ const SOUNDS = {
     const end = t + 1.6;
     o1.start(t); o1.stop(end); o2.start(t); o2.stop(end);
   }},
+  glide: { label: 'Synthé glissé', send: { d: 0.2, r: 0.22 },
+    play(c, f, t, d, v) { this.glide(c, t, d / 4, [f, f, f, f], v); },
+    glide(c, t, sub, freqs, v) {
+      const ctx = c.ctx, out = voiceOut(c, this.send);
+      const dur = Math.max(sub * freqs.length, 0.08);
+      const amp = ctx.createGain(), flt = ctx.createBiquadFilter();
+      flt.type = 'lowpass'; flt.Q.value = 5;
+      flt.frequency.setValueAtTime(450, t);
+      flt.frequency.exponentialRampToValueAtTime(3200, t + 0.04);
+      flt.frequency.setTargetAtTime(1700, t + 0.05, 0.25);
+      amp.gain.setValueAtTime(0, t);
+      amp.gain.linearRampToValueAtTime(0.16 * v, t + 0.02);
+      amp.gain.setTargetAtTime(0.13 * v, t + 0.03, 0.2);
+      amp.gain.setTargetAtTime(0, t + dur, 0.07);
+      const o1 = osc(ctx, 'sawtooth', freqs[0], -8), o2 = osc(ctx, 'sawtooth', freqs[0], 8), o3 = osc(ctx, 'square', freqs[0] / 2);
+      const sub2 = ctx.createGain(); sub2.gain.value = 0.3;
+      for (const [o, mul] of [[o1, 1], [o2, 1], [o3, 0.5]]) {
+        o.frequency.setValueAtTime(freqs[0] * mul, t);
+        for (let k = 1; k < freqs.length; k++) o.frequency.linearRampToValueAtTime(freqs[k] * mul, t + k * sub);
+      }
+      const lfo = osc(ctx, 'sine', 5.2), lfoG = ctx.createGain();
+      lfoG.gain.setValueAtTime(0, t); lfoG.gain.linearRampToValueAtTime(6, t + 0.4);
+      lfo.connect(lfoG); lfoG.connect(o1.detune); lfoG.connect(o2.detune);
+      o1.connect(flt); o2.connect(flt); o3.connect(sub2); sub2.connect(flt);
+      flt.connect(amp); amp.connect(out);
+      const end = t + dur + 0.6;
+      for (const o of [o1, o2, o3, lfo]) { o.start(t); o.stop(end); }
+    } },
   marimba: { label: 'Marimba', send: { d: 0.12, r: 0.25 }, play(c, f, t, d, v) {
     const ctx = c.ctx, out = voiceOut(c, this.send);
     const parts = [[1, 0.34, 0.38], [3.98, 0.09, 0.05], [9.9, 0.025, 0.018]];
@@ -637,7 +703,9 @@ function drumHit(c, kind, t) {
 
 function scheduleStepOn(c, s, t, sc, sound, drums, bpm, vel = 0.9) {
   const sd = 60 / bpm / 4;
-  for (const e of sc[s]) {
+  if (sound === 'glide') {
+    for (const g of (sc.glides ? sc.glides[s] : [])) SOUNDS.glide.glide(c, t + g.off * sd / SUB, sd / SUB, g.ys.map(y => midiFreq(yToMidiF(y))), vel);
+  } else for (const e of sc[s]) {
     const m = ROWS[e.row];
     if (m !== undefined) SOUNDS[sound].play(c, midiFreq(m), t, e.len * sd * 0.92, vel);
   }
@@ -671,7 +739,8 @@ function scheduler() {
   while (nextTime < ac.currentTime + 0.12) {
     scheduleStepOn(fx, nextStep, nextTime, score, state.sound, state.drums, state.bpm);
     if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, state.sound, 'off', state.bpm, 0.55);
-    for (const e of score[nextStep]) hits.push({ time: nextTime, step: nextStep, row: e.row });
+    if (state.sound === 'glide') { for (const g of score.glides[nextStep]) hits.push({ time: nextTime + g.off * stepDur() / SUB, step: nextStep, row: yToRow(g.ys[0]) }); }
+    else for (const e of score[nextStep]) hits.push({ time: nextTime, step: nextStep, row: e.row });
     timeline.push({ step: nextStep, time: nextTime, dur: stepDur() });
     nextTime += stepDur();
     nextStep = (nextStep + 1) % STEPS;
@@ -1463,7 +1532,7 @@ function buildTemplateList() {
 }
 
 function initUI() {
-  fillSelect($('#selSound'), Object.entries(SOUNDS).map(([k, v]) => [k, v.label]));
+  fillSelect($('#selSound'), ['retro', 'glide', 'chip', 'pad', 'pluck', 'marimba'].map(k => [k, SOUNDS[k].label]));
   fillSelect($('#selDrums'), Object.entries(DRUMS).map(([k, v]) => [k, v.label]));
   fillSelect($('#selScale'), Object.entries(SCALES).map(([k, v]) => [k, v.label]));
   fillSelect($('#selKey'), NOTE_NAMES.map((n, i) => [String(i), n]));
