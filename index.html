@@ -107,6 +107,11 @@ button { cursor: pointer; }
 .toggle[aria-pressed="true"] { background: rgba(255,255,255,0.12); color: var(--neon); }
 #btnMetro.tick svg { filter: drop-shadow(0 0 6px var(--neon)); color: #fff; }
 #btnMetro.tick.accent svg { transform: scale(1.12); }
+.volrow { display: flex; align-items: center; gap: 8px; justify-self: end; }
+.volrow input { width: 130px; accent-color: var(--neon); }
+.volrow output { min-width: 34px; text-align: right; font: 500 12px/1 var(--font-mono); color: var(--muted); font-variant-numeric: tabular-nums; }
+.instdot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--neon); box-shadow: 0 0 6px var(--neon); margin-right: 5px; vertical-align: 0; }
+#swInstName { color: var(--neon); }
 .tempo output { min-width: 30px; text-align: center; font: 700 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .swatchbtn { position: relative; }
 .swatchbtn .dot { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.5); }
@@ -351,13 +356,13 @@ button { cursor: pointer; }
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13h10l1-13"/><path d="M9 7V4h6v3"/></svg>
   </button>
   <span class="sep"></span>
-  <label class="field" for="selSound"><span>Son</span><select id="selSound"></select></label>
+  <label class="field" for="selSound"><span><i class="instdot"></i>Instrument</span><select id="selSound"></select></label>
   <div class="field tempo"><span>Tempo</span>
     <div class="row"><button id="bpmDown" aria-label="Ralentir">−</button><output id="bpmVal">100</output><button id="bpmUp" aria-label="Accélérer">+</button></div>
   </div>
-  <label class="field" for="selDrums"><span>Batterie</span><select id="selDrums"></select></label>
+  <label class="field" for="selDrums"><span>Rythme auto</span><select id="selDrums"></select></label>
   <span class="sep"></span>
-  <button id="btnMetro" class="icon toggle" title="Métronome (T) : un clic sur chaque temps, absent des enregistrements" aria-label="Métronome" aria-pressed="false">
+  <button id="btnMetro" class="icon toggle" title="Métronome (T) : un clic sur chaque temps, absent des enregistrements. Volume dans Réglages." aria-label="Métronome" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5z"/><path d="M12 15l5-8"/><path d="M7 15h10"/></svg>
   </button>
   <button id="btnMove" class="icon toggle" title="Déplacer les formes (V). Flèches : un pas ou une note." aria-label="Déplacer les formes" aria-pressed="false">
@@ -372,12 +377,14 @@ button { cursor: pointer; }
 
 <!-- Couleurs -->
 <div id="popColors" class="pop glass" hidden>
-  <div><h3>Couleur des néons</h3><div class="swatches" id="swNeon"></div></div>
+  <div><h3>Couleur de l'instrument <span id="swInstName"></span></h3><div class="swatches" id="swNeon"></div></div>
   <div><h3>Couleur de la barre de lecture</h3><div class="swatches" id="swHead"></div></div>
 </div>
 
 <!-- Réglages -->
 <div id="popSettings" class="pop glass" hidden>
+  <div class="set-row"><label for="metroVol">Volume du métronome</label>
+    <div class="volrow"><input type="range" id="metroVol" min="0" max="100" step="1"><output id="metroVolVal"></output></div></div>
   <div class="set-row"><label for="selScale">Gamme</label><select id="selScale"></select></div>
   <div class="set-row"><label for="selKey">Tonalité</label><select id="selKey"></select></div>
   <div class="set-row"><label>Lissage du trait</label>
@@ -450,18 +457,25 @@ const DRUMS = {
   douce:  { label: 'Douce',  kick: [0, 16], clap: [8, 24], hat: [2, 6, 10, 14, 18, 22, 26, 30] },
   groove: { label: 'Groove', kick: [0, 8, 11, 16, 24, 27], clap: [4, 12, 20, 28], hat: [0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30] },
 };
-const NEONS = ['#b8ff3c', '#3cf2ff', '#ff9a3c', '#ff4fa3', '#a98bff', '#f4f7ee'];
+const NEONS = ['#b8ff3c', '#3cf2ff', '#ffe03c', '#a98bff', '#ff9a3c', '#ff4fa3', '#f4f7ee', '#ff5b5b'];
+// Chaque instrument a sa couleur : un trait garde l'instrument avec lequel il a été dessiné.
+const INST_COLORS = { retro: '#b8ff3c', glide: '#3cf2ff', chip: '#ffe03c', pad: '#a98bff', pluck: '#ff9a3c', marimba: '#ff4fa3', drums: '#f4f7ee' };
+const INST_ORDER = ['retro', 'glide', 'chip', 'pad', 'pluck', 'marimba', 'drums'];
+// Batterie : la hauteur choisit le son (fraction de la grille, du bas vers le haut)
+const DRUM_ZONES = [[0.18, 'kick', 'Grosse caisse'], [0.36, 'tom', 'Tom'], [0.54, 'snare', 'Caisse claire'], [0.68, 'clap', 'Clap'], [0.86, 'hat', 'Charleston'], [1.01, 'ohat', 'Charleston ouvert']];
 const HEADS = ['#ff3df2', '#3cf2ff', '#ffe03c', '#ff4b4b', '#ffffff'];
 const SMOOTH = [ { min: 2.6, beta: 9 }, { min: 1.3, beta: 7 }, { min: 0.7, beta: 5 } ];
 const PINCH  = [ 0.22, 0.30, 0.38 ]; // seuil de contact (distance pouce-index / taille de la main)
 
 /* ---------------- état ---------------- */
 const state = {
-  strokes: [],          // [{ pts: [[x,y], ...] }] coordonnées normalisées 0..1
+  strokes: [],          // [{ pts: [[x,y], ...], inst }] coordonnées normalisées 0..1
+  instColors: { ...INST_COLORS },
   bpm: 100, sound: 'retro', drums: 'off', scale: 'penta-mineure', key: 0,
   neon: NEONS[0], head: HEADS[0], showCam: true, smooth: 1, pinch: 1,
   playing: true,
   metro: false,         // métronome
+  metroVol: 70,         // volume du métronome, 0 à 100
   mode: 'draw',         // 'draw' ou 'move'
   libId: null,          // création de la bibliothèque actuellement ouverte
   unsaved: false,       // modifications pas encore enregistrées dans la bibliothèque
@@ -478,10 +492,15 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
-    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved','metro']) if (k in s) state[k] = s[k];
+    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved','metro','metroVol','instColors']) if (k in s) state[k] = s[k];
     if (Array.isArray(s.strokes)) state.strokes = s.strokes.filter(st => Array.isArray(st.pts) && st.pts.length);
     if (!('unsaved' in s)) state.unsaved = state.strokes.length > 0; // dessin d'avant la bibliothèque
     if (!SOUNDS[state.sound]) state.sound = 'retro';
+    // versions précédentes : une seule couleur et un seul son pour tous les traits
+    const hadInst = !!s.instColors;
+    state.instColors = { ...INST_COLORS, ...(s.instColors || {}) };
+    if (!hadInst && s.neon) state.instColors[state.sound] = s.neon;
+    state.strokes.forEach(st => { if (!SOUNDS[st.inst]) st.inst = state.sound; });
     if (!DRUMS[state.drums]) state.drums = 'off';
     if (!SCALES[state.scale]) state.scale = 'penta-mineure';
   } catch (e) { /* stockage indisponible : on continue sans */ }
@@ -513,6 +532,8 @@ function yToMidiF(y) {
   const i = Math.min(n - 2, Math.floor(r)), f = r - i;
   return ROWS[i] + (ROWS[i + 1] - ROWS[i]) * f;
 }
+const instColor = (inst) => state.instColors[inst] || INST_COLORS[inst] || '#b8ff3c';
+const drumZone = (row) => DRUM_ZONES.find(z => row / (ROWS.length - 1) < z[0]) || DRUM_ZONES[DRUM_ZONES.length - 1];
 const yToRow = (y) => clamp(Math.round((GB - y) / (GB - GT) * (ROWS.length - 1)), 0, ROWS.length - 1);
 const rowToY = (r) => GB - r / (ROWS.length - 1) * (GB - GT);
 
@@ -531,7 +552,8 @@ function crossings(pts, xc) {
 function buildScore(strokes) {
   const events = Array.from({ length: STEPS }, () => new Map());
   for (const st of strokes) {
-    const pts = st.pts;
+    const pts = st.pts, inst = SOUNDS[st.inst] ? st.inst : 'retro';
+    if (inst === 'glide') continue; // traité par buildGlides
     const sets = [];
     let any = false;
     for (let s = 0; s < STEPS; s++) {
@@ -547,16 +569,22 @@ function buildScore(strokes) {
     }
     for (let s = 0; s < STEPS; s++) {
       for (const r of sets[s]) {
-        if (s > 0 && sets[s - 1].includes(r)) continue; // note tenue
+        const held = s > 0 && sets[s - 1].includes(r);
+        if (inst === 'drums') { // batterie : un coup au début, puis un coup par croche tant que le trait dure
+          if (held && s % 2) continue;
+          events[s].set('drums:' + r, { row: r, len: 1, inst });
+          continue;
+        }
+        if (held) continue; // note tenue
         let len = 1;
         while (s + len < STEPS && len < 16 && sets[s + len].includes(r)) len++;
-        const prev = events[s].get(r);
-        if (!prev || prev < len) events[s].set(r, len);
+        const prev = events[s].get(inst + ':' + r);
+        if (!prev || prev.len < len) events[s].set(inst + ':' + r, { row: r, len, inst });
       }
     }
   }
-  const res = events.map(m => [...m.entries()].slice(0, 6).map(([row, len]) => ({ row, len })));
-  res.glides = buildGlides(strokes);
+  const res = events.map(m => [...m.values()].slice(0, 8));
+  res.glides = buildGlides(strokes.filter(st => st.inst === 'glide'));
   return res;
 }
 // Synthé glissé : chaque passage de la barre sur un trait devient une seule note continue
@@ -731,6 +759,7 @@ const SOUNDS = {
       const end = t + dur + 0.6;
       for (const o of [o1, o2, o3, lfo]) { o.start(t); o.stop(end); }
     } },
+  drums: { label: 'Batterie', send: { d: 0, r: 0 }, play(c, f, t) { drumHit(c, 'kick', t); drumHit(c, 'hat', t + 0.15); } },
   marimba: { label: 'Marimba', send: { d: 0.12, r: 0.25 }, play(c, f, t, d, v) {
     const ctx = c.ctx, out = voiceOut(c, this.send);
     const parts = [[1, 0.34, 0.38], [3.98, 0.09, 0.05], [9.9, 0.025, 0.018]];
@@ -753,6 +782,11 @@ function drumHit(c, kind, t) {
     o.frequency.setValueAtTime(155, t); o.frequency.exponentialRampToValueAtTime(44, t + 0.13);
     g.gain.setValueAtTime(0.95, t); g.gain.setTargetAtTime(0, t + 0.02, 0.11);
     o.connect(g); g.connect(c.drumBus); o.start(t); o.stop(t + 0.7);
+  } else if (kind === 'tom') {
+    const o = osc(ctx, 'sine', 190), g = ctx.createGain();
+    o.frequency.setValueAtTime(200, t); o.frequency.exponentialRampToValueAtTime(95, t + 0.25);
+    g.gain.setValueAtTime(0.7, t); g.gain.setTargetAtTime(0, t + 0.02, 0.14);
+    o.connect(g); g.connect(c.drumBus); o.start(t); o.stop(t + 0.9);
   } else {
     const n = ctx.createBufferSource(); n.buffer = noiseBuffer(ctx);
     const flt = ctx.createBiquadFilter(), g = ctx.createGain();
@@ -761,6 +795,16 @@ function drumHit(c, kind, t) {
       g.gain.setValueAtTime(0, t);
       for (let i = 0; i < 3; i++) { g.gain.setValueAtTime(0.38, t + i * 0.011); g.gain.setTargetAtTime(0.05, t + i * 0.011 + 0.001, 0.004); }
       g.gain.setValueAtTime(0.3, t + 0.034); g.gain.setTargetAtTime(0, t + 0.035, 0.07);
+    } else if (kind === 'snare') {
+      flt.type = 'bandpass'; flt.frequency.value = 3200; flt.Q.value = 0.6;
+      g.gain.setValueAtTime(0.42, t); g.gain.setTargetAtTime(0, t + 0.004, 0.06);
+      const o = osc(ctx, 'triangle', 190), og = ctx.createGain();
+      o.frequency.setValueAtTime(220, t); o.frequency.exponentialRampToValueAtTime(160, t + 0.06);
+      og.gain.setValueAtTime(0.35, t); og.gain.setTargetAtTime(0, t + 0.002, 0.04);
+      o.connect(og); og.connect(c.drumBus); o.start(t); o.stop(t + 0.3);
+    } else if (kind === 'ohat') {
+      flt.type = 'highpass'; flt.frequency.value = 6500;
+      g.gain.setValueAtTime(0.12, t); g.gain.setTargetAtTime(0, t + 0.01, 0.13);
     } else {
       flt.type = 'highpass'; flt.frequency.value = 7500;
       g.gain.setValueAtTime(0.13, t); g.gain.setTargetAtTime(0, t + 0.002, 0.022);
@@ -770,13 +814,13 @@ function drumHit(c, kind, t) {
   }
 }
 
-function scheduleStepOn(c, s, t, sc, sound, drums, bpm, vel = 0.9) {
+function scheduleStepOn(c, s, t, sc, drums, bpm, vel = 0.9) {
   const sd = 60 / bpm / 4;
-  if (sound === 'glide') {
-    for (const g of (sc.glides ? sc.glides[s] : [])) SOUNDS.glide.glide(c, t + g.off * sd / SUB, sd / SUB, g.ys.map(y => midiFreq(yToMidiF(y))), vel);
-  } else for (const e of sc[s]) {
+  for (const g of (sc.glides ? sc.glides[s] : [])) SOUNDS.glide.glide(c, t + g.off * sd / SUB, sd / SUB, g.ys.map(y => midiFreq(yToMidiF(y))), vel);
+  for (const e of sc[s]) {
+    if (e.inst === 'drums') { drumHit(c, drumZone(e.row)[1], t); continue; }
     const m = ROWS[e.row];
-    if (m !== undefined) SOUNDS[sound].play(c, midiFreq(m), t, e.len * sd * 0.92, vel);
+    if (m !== undefined && SOUNDS[e.inst]) SOUNDS[e.inst].play(c, midiFreq(m), t, e.len * sd * 0.92, vel);
   }
   const dr = DRUMS[drums];
   if (dr.kick) {
@@ -806,10 +850,10 @@ function scheduler() {
   if (scoreDirty && performance.now() - lastScoreAt > 70) rescore();
   if (!state.playing || dragPos !== null) return;
   while (nextTime < ac.currentTime + 0.12) {
-    scheduleStepOn(fx, nextStep, nextTime, score, state.sound, state.drums, state.bpm);
-    if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, state.sound, 'off', state.bpm, 0.55);
-    if (state.sound === 'glide') { for (const g of score.glides[nextStep]) hits.push({ time: nextTime + g.off * stepDur() / SUB, step: nextStep, row: yToRow(g.ys[0]) }); }
-    else for (const e of score[nextStep]) hits.push({ time: nextTime, step: nextStep, row: e.row });
+    scheduleStepOn(fx, nextStep, nextTime, score, state.drums, state.bpm);
+    if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, 'off', state.bpm, 0.55);
+    for (const g of score.glides[nextStep]) hits.push({ time: nextTime + g.off * stepDur() / SUB, step: nextStep, row: yToRow(g.ys[0]), inst: 'glide' });
+    for (const e of score[nextStep]) hits.push({ time: nextTime, step: nextStep, row: e.row, inst: e.inst });
     if (state.metro && nextStep % 4 === 0) metroClick(nextTime, nextStep % 16 === 0);
     timeline.push({ step: nextStep, time: nextTime, dur: stepDur() });
     nextTime += stepDur();
@@ -821,15 +865,21 @@ function scheduler() {
 // Métronome : branché directement sur les haut-parleurs, donc absent des vidéos et du WAV.
 let metroOut = null, lastBeat = { time: -1, accent: false };
 function metroClick(t, accent) {
-  if (!metroOut) { metroOut = ac.createGain(); metroOut.gain.value = 0.5; metroOut.connect(ac.destination); }
-  const o = ac.createOscillator(), g = ac.createGain();
-  o.type = 'sine'; o.frequency.value = accent ? 1760 : 1175;
-  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(accent ? 0.5 : 0.3, t + 0.002);
-  g.gain.setTargetAtTime(0, t + 0.004, 0.018);
-  o.connect(g); g.connect(metroOut); o.start(t); o.stop(t + 0.12);
+  if (!metroOut) { metroOut = ac.createGain(); metroOut.connect(ac.destination); }
+  metroOut.gain.value = metroGain();
+  if (metroOut.gain.value <= 0) { metroBeats.push({ time: t, accent }); return; }
+  // clic sec et bien audible : carré filtré + attaque très courte
+  const o = ac.createOscillator(), g = ac.createGain(), f = ac.createBiquadFilter();
+  o.type = 'square'; o.frequency.value = accent ? 1660 : 1100;
+  f.type = 'bandpass'; f.frequency.value = accent ? 2400 : 1800; f.Q.value = 1.2;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(accent ? 1 : 0.7, t + 0.001);
+  g.gain.setTargetAtTime(0, t + 0.003, 0.022);
+  o.connect(f); f.connect(g); g.connect(metroOut); o.start(t); o.stop(t + 0.15);
   metroBeats.push({ time: t, accent });
 }
 const metroBeats = [];
+// courbe douce : 0 = muet, 100 = très fort
+const metroGain = () => Math.pow(clamp(state.metroVol, 0, 100) / 100, 1.6) * 1.6;
 function metroVisual() {
   if (!ac) return;
   const now = ac.currentTime;
@@ -898,7 +948,7 @@ function clearAll() {
 }
 const nowS = () => performance.now() / 1000;
 function startStroke(key, x, y, t = nowS()) {
-  active.set(key, { pts: [[x, y]], times: [t], t0: t });
+  active.set(key, { pts: [[x, y]], times: [t], t0: t, inst: state.sound });
   scoreDirty = true;
 }
 function addPoint(key, x, y, t = nowS()) {
@@ -928,10 +978,11 @@ function endStroke(key, opts = {}) {
     let len = 0;
     for (let i = 1; i < pts.length; i++) len += Math.hypot((pts[i][0] - pts[i - 1][0]) * W, (pts[i][1] - pts[i - 1][1]) * H);
     const tiny = len < Math.max(14, H * 0.018);
-    if (dur < 0.15 || (tiny && dur < 0.45)) { scoreDirty = true; return; } // parasite : ignoré
+    // parasite : ignoré (la batterie accepte des « taps » plus courts)
+    if (dur < 0.15 || (tiny && dur < (s.inst === 'drums' ? 0.22 : 0.45))) { scoreDirty = true; return; }
     if (tiny) pts = [pts[Math.floor(pts.length / 2)]]; // pincement tenu sur place : une note
   }
-  commit([...state.strokes, { pts: simplify(pts, 0.0011) }]);
+  commit([...state.strokes, { pts: simplify(pts, 0.0011), inst: s.inst }]);
 }
 function simplify(pts, eps) {
   if (pts.length < 3) return pts.slice();
@@ -1012,7 +1063,7 @@ function templateStrokesNorm(def) {
   return def.strokes.map(s => {
     const raw = s === 'heart' ? heart() : s;
     const smooth = s === 'heart' ? raw : catmull(raw);
-    return { pts: smooth.map(([st, r]) => [st / STEPS, GB - r / n * (GB - GT)]) };
+    return { pts: smooth.map(([st, r]) => [st / STEPS, GB - r / n * (GB - GT)]), inst: def.sound };
   });
 }
 function applySettingsUI() {
@@ -1022,7 +1073,8 @@ function applySettingsUI() {
   if (fx) setDelayTime(fx, state.bpm, ac.currentTime);
 }
 function openTemplate(def) {
-  state.scale = def.scale; state.key = def.key; state.bpm = def.bpm; state.sound = def.sound; state.drums = def.drums;
+  state.scale = def.scale; state.key = def.key; state.bpm = def.bpm; state.drums = def.drums;
+  setBrush(def.sound);
   ROWS = noteRows();
   applySettingsUI();
   const strokes = templateStrokesNorm(def);
@@ -1137,7 +1189,7 @@ function drawTube(g, pts, color) {
 function rebuildLayer() {
   lctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   lctx.clearRect(0, 0, W, H);
-  for (const s of state.strokes) drawTube(lctx, s.pts, state.neon);
+  for (const s of state.strokes) drawTube(lctx, s.pts, instColor(s.inst));
   layerDirty = false;
 }
 
@@ -1184,8 +1236,13 @@ function drawGrid() {
     const root = (ROWS[r] - ROWS[0]) % 12 === 0;
     ctx.strokeStyle = root ? 'rgba(255,255,255,0.17)' : 'rgba(255,255,255,0.06)';
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    ctx.fillStyle = root ? 'rgba(255,255,255,0.78)' : 'rgba(255,255,255,0.45)';
-    ctx.fillText(midiName(ROWS[r]), 12, y - 7);
+    if (state.sound === 'drums') {
+      const z = drumZone(r);
+      if (r === 0 || drumZone(r - 1) !== z) { ctx.fillStyle = 'rgba(255,255,255,0.78)'; ctx.fillText(z[2], 12, y - 7); }
+    } else {
+      ctx.fillStyle = root ? 'rgba(255,255,255,0.78)' : 'rgba(255,255,255,0.45)';
+      ctx.fillText(midiName(ROWS[r]), 12, y - 7);
+    }
   }
   ctx.restore();
 }
@@ -1264,7 +1321,7 @@ function drawPlayhead(pos, t) {
     ctx.strokeStyle = rgba(c, 0.8 * (1 - k)); ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(hx, hy, 8 + k * 26, 0, Math.PI * 2); ctx.stroke();
     ctx.fillStyle = `rgba(255,255,255,${0.9 * (1 - k)})`;
-    ctx.fillText(midiName(ROWS[h.row] ?? 0), hx + 14, hy - 14 - k * 10);
+    ctx.fillText(h.inst === 'drums' ? drumZone(h.row)[2] : midiName(ROWS[h.row] ?? 0), hx + 14, hy - 14 - k * 10);
   }
   ctx.restore();
 }
@@ -1337,7 +1394,7 @@ function frame(nowMs) {
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.drawImage(layer, 0, 0);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
-  for (const s of active.values()) drawTube(ctx, s.pts, state.neon);
+  for (const s of active.values()) drawTube(ctx, s.pts, instColor(s.inst));
   drawSelection();
   drawPlayhead(playheadPos(), t);
   drawSparks(dt);
@@ -1410,7 +1467,10 @@ function onHands(res, t) {
           h.pinch = true; h.cnt = 0; h.firmAt = t;
           // en pause, pincer sur la barre magenta l'attrape au lieu de dessiner
           if (!state.playing && dragPos === null && Math.abs(h.pt[0] - playheadPos()) < 0.03) { h.grab = true; dragPos = clamp(h.pt[0], 0, 0.9999); }
-          else if (state.mode === 'move') { h.moving = !moving && beginMove(key, h.pt[0], h.pt[1]); }
+          else if (state.mode === 'move') {
+            const hc = moving ? -1 : hitHandle(h.pt[0], h.pt[1], 26);
+            h.moving = !moving && (hc >= 0 ? beginResize(key, hc) : beginMove(key, h.pt[0], h.pt[1]));
+          }
           else startStroke(key, h.pt[0], h.pt[1], t);
         }
       }
@@ -1513,7 +1573,7 @@ function setMode(m) {
   if (m !== 'move') selected = null;
   canvas.style.cursor = m === 'move' ? 'grab' : 'crosshair';
   updateStatus(); updateHint();
-  if (m === 'move') toast('Mode Déplacer : attrape une forme. Flèches pour l’ajuster d’un pas ou d’une note.');
+  if (m === 'move') toast('Mode Déplacer : attrape une forme, ou un coin pour changer sa taille');
 }
 function distToStroke(st, px, py) {
   const p = st.pts.map(([x, y]) => [x * W, y * H]);
@@ -1543,13 +1603,56 @@ function shiftedPts(base, dx, dy) {
   dy = clamp(dy, 0.02 - b.y0, 0.98 - b.y1);
   return base.map(([x, y]) => [x + dx, y + dy]);
 }
+// Poignées aux 4 coins du cadre de la forme sélectionnée (0 haut-gauche, 1 haut-droite, 2 bas-droite, 3 bas-gauche)
+const HANDLE_M = 14;
+function handlePoints(st) {
+  const b = boundsOf(st.pts), mx = HANDLE_M / W, my = HANDLE_M / H;
+  return [[b.x0 - mx, b.y0 - my], [b.x1 + mx, b.y0 - my], [b.x1 + mx, b.y1 + my], [b.x0 - mx, b.y1 + my]];
+}
+function hitHandle(x, y, radius = 16) {
+  if (state.mode !== 'move' || !selected || !state.strokes.includes(selected) || selected.pts.length < 2) return -1;
+  const hp = handlePoints(selected);
+  for (let i = 0; i < 4; i++) if (Math.hypot((hp[i][0] - x) * W, (hp[i][1] - y) * H) <= radius) return i;
+  return -1;
+}
+// Agrandir / rapetisser autour d'un point fixe (ax, ay), en gardant la forme dans l'écran
+function scaledPts(base, ax, ay, fx, fy) {
+  return base.map(([x, y]) => [clamp(ax + (x - ax) * fx, 0, 0.999), clamp(ay + (y - ay) * fy, 0.02, 0.98)]);
+}
+function beginResize(key, corner) {
+  const idx = state.strokes.indexOf(selected);
+  if (idx < 0) return false;
+  history.push(state.strokes);
+  if (history.length > 120) history.shift();
+  const base = selected.pts, b = boundsOf(base);
+  const copy = { ...selected, pts: base.map(p => p.slice()) };
+  state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
+  selected = copy;
+  const ax = corner === 0 || corner === 3 ? b.x1 : b.x0;   // coin opposé fixe
+  const ay = corner === 0 || corner === 1 ? b.y1 : b.y0;
+  const cx = corner === 0 || corner === 3 ? b.x0 : b.x1;
+  const cy = corner === 0 || corner === 1 ? b.y0 : b.y1;
+  moving = { key, idx, base, resize: true, ax, ay, cx, cy };
+  return true;
+}
+function scaleSelected(fx, fy) {
+  const idx = selected ? state.strokes.indexOf(selected) : -1;
+  if (idx < 0) { toast('Attrape d’abord une forme en mode Déplacer'); return; }
+  const b = boundsOf(selected.pts);
+  const copy = { ...selected, pts: scaledPts(selected.pts, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, fx, fy) };
+  const next = state.strokes.slice(); next[idx] = copy;
+  selected = copy;
+  commit(next);
+}
 function beginMove(key, x, y) {
+  const corner = hitHandle(x, y);
+  if (corner >= 0) return beginResize(key, corner);
   const idx = hitStroke(x, y);
   if (idx < 0) { selected = null; return false; }
   history.push(state.strokes);
   if (history.length > 120) history.shift();
   const base = state.strokes[idx].pts;
-  const copy = { pts: base.map(p => p.slice()) };
+  const copy = { ...state.strokes[idx], pts: base.map(p => p.slice()) };
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
   selected = copy;
   moving = { key, idx, base, sx: x, sy: y };
@@ -1558,6 +1661,15 @@ function beginMove(key, x, y) {
 }
 function updateMove(x, y) {
   if (!moving) return;
+  if (moving.resize) {
+    const m = moving, w0 = m.cx - m.ax, h0 = m.cy - m.ay;
+    // facteur d'échelle par axe ; une forme presque plate ne s'étire pas dans son axe plat
+    const fx = Math.abs(w0) < 0.004 ? 1 : Math.max(0.08, (x - m.ax) / w0);
+    const fy = Math.abs(h0) < 0.004 ? 1 : Math.max(0.08, (y - m.ay) / h0);
+    state.strokes[m.idx].pts = scaledPts(m.base, m.ax, m.ay, fx, fy);
+    layerDirty = true; scoreDirty = true;
+    return;
+  }
   state.strokes[moving.idx].pts = shiftedPts(moving.base, x - moving.sx, y - moving.sy);
   layerDirty = true; scoreDirty = true;
 }
@@ -1570,7 +1682,7 @@ function nudge(dxSteps, dyRows) {
   const idx = selected ? state.strokes.indexOf(selected) : -1;
   if (idx < 0) { toast('Attrape d’abord une forme en mode Déplacer'); return; }
   const rowH = (GB - GT) / (ROWS.length - 1);
-  const copy = { pts: shiftedPts(selected.pts, dxSteps / STEPS, -dyRows * rowH) };
+  const copy = { ...selected, pts: shiftedPts(selected.pts, dxSteps / STEPS, -dyRows * rowH) };
   const next = state.strokes.slice(); next[idx] = copy;
   selected = copy;
   commit(next);
@@ -1582,6 +1694,13 @@ function drawSelection() {
   ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
   const b = boundsOf(selected.pts), m = 14;
   ctx.strokeRect(b.x0 * W - m, b.y0 * H - m, (b.x1 - b.x0) * W + 2 * m, (b.y1 - b.y0) * H + 2 * m);
+  if (selected.pts.length > 1) { // poignées pour agrandir / rapetisser
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#fff'; ctx.strokeStyle = 'rgba(0,0,0,0.6)'; ctx.lineWidth = 1.5;
+    for (const [hx, hy] of handlePoints(selected)) {
+      ctx.beginPath(); ctx.rect(hx * W - 6, hy * H - 6, 12, 12); ctx.fill(); ctx.stroke();
+    }
+  }
   ctx.restore();
 }
 
@@ -1594,7 +1713,7 @@ canvas.addEventListener('pointerdown', (e) => {
   closePanels();
   canvas.setPointerCapture(e.pointerId);
   if (nearPlayhead(e.clientX, e.clientY)) { ptrDrag = true; dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
-  if (state.mode === 'move') { if (beginMove('ptr', e.clientX / W, e.clientY / H)) canvas.style.cursor = 'grabbing'; return; }
+  if (state.mode === 'move') { if (beginMove('ptr', e.clientX / W, e.clientY / H) && !moving.resize) canvas.style.cursor = 'grabbing'; return; }
   startStroke('ptr', e.clientX / W, e.clientY / H);
   updateHint();
 });
@@ -1603,7 +1722,11 @@ canvas.addEventListener('pointermove', (e) => {
   if (moving && moving.key === 'ptr') { updateMove(e.clientX / W, e.clientY / H); return; }
   if (active.has('ptr')) { addPoint('ptr', e.clientX / W, e.clientY / H); return; }
   canvas.style.cursor = nearPlayhead(e.clientX, e.clientY) ? 'ew-resize'
-    : state.mode === 'move' ? (hitStroke(e.clientX / W, e.clientY / H) >= 0 ? 'grab' : 'default') : 'crosshair';
+    : state.mode === 'move' ? (() => {
+        const hc = hitHandle(e.clientX / W, e.clientY / H);
+        if (hc >= 0) return hc % 2 === 0 ? 'nwse-resize' : 'nesw-resize';
+        return hitStroke(e.clientX / W, e.clientY / H) >= 0 ? 'grab' : 'default';
+      })() : 'crosshair';
 });
 const endPtr = () => {
   if (ptrDrag) { ptrDrag = false; seekTo(dragPos); dragPos = null; return; }
@@ -1671,7 +1794,7 @@ async function exportWav() {
   setDelayTime(chain, state.bpm, 0);
   const sc = buildScore(state.strokes);
   for (let l = 0; l < loops; l++) for (let s = 0; s < STEPS; s++) {
-    scheduleStepOn(chain, s, 0.05 + (l * STEPS + s) * sd, sc, state.sound, state.drums, state.bpm);
+    scheduleStepOn(chain, s, 0.05 + (l * STEPS + s) * sd, sc, state.drums, state.bpm);
   }
   const buf = await oc.startRendering();
   download(encodeWav(buf), `${today()}-neon-mano-boucle-${stamp()}.wav`);
@@ -1713,7 +1836,8 @@ function fmtDate(ms) {
 }
 function snapshot() {
   return {
-    strokes: state.strokes.map(st => ({ pts: st.pts.map(p => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4]) })),
+    strokes: state.strokes.map(st => ({ pts: st.pts.map(p => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4]), inst: st.inst })),
+    instColors: { ...state.instColors },
     sound: state.sound, scale: state.scale, key: state.key, bpm: state.bpm, drums: state.drums, neon: state.neon, head: state.head,
   };
 }
@@ -1742,16 +1866,19 @@ function openCreation(id) {
   if (!it) return;
   protectCurrent();
   if (template) closeTemplate();
-  if (SOUNDS[it.sound]) state.sound = it.sound;
   if (SCALES[it.scale]) state.scale = it.scale;
   if (DRUMS[it.drums]) state.drums = it.drums;
   state.key = Number(it.key) || 0; state.bpm = clamp(Number(it.bpm) || 100, 50, 180);
   ROWS = noteRows();
   applySettingsUI();
-  if (it.neon) setColor('neon', it.neon);
+  const legacy = SOUNDS[it.sound] ? it.sound : 'retro';
+  state.instColors = { ...INST_COLORS, ...(it.instColors || {}) };
+  if (!it.instColors && it.neon) state.instColors[legacy] = it.neon;
+  layerDirty = true;
   if (it.head) setColor('head', it.head);
-  buildSwatches($('#swNeon'), NEONS, 'neon'); buildSwatches($('#swHead'), HEADS, 'head');
-  commit(it.strokes.map(st => ({ pts: st.pts.map(p => p.slice()) })));
+  setBrush(legacy);
+  buildSwatches($('#swHead'), HEADS, 'head');
+  commit(it.strokes.map(st => ({ pts: st.pts.map(p => p.slice()), inst: SOUNDS[st.inst] ? st.inst : legacy })));
   state.libId = it.id; state.unsaved = false; save();
   renderLib(); closePanels();
   if (!state.playing) setPlaying(true);
@@ -1785,11 +1912,13 @@ async function importFile(file) {
   }
 }
 function drawCreationThumb(cv, it) {
-  const g = cv.getContext('2d'), w = cv.width, h = cv.height, col = it.neon || state.neon;
+  const g = cv.getContext('2d'), w = cv.width, h = cv.height;
   g.fillStyle = '#0b0d12'; g.fillRect(0, 0, w, h);
-  g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 3;
-  g.strokeStyle = col; g.fillStyle = col; g.shadowColor = col; g.shadowBlur = 6;
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 3; g.shadowBlur = 6;
   for (const st of it.strokes) {
+    const inst = st.inst || it.sound;
+    const col = (it.instColors && it.instColors[inst]) || (!it.instColors && it.neon) || INST_COLORS[inst] || '#b8ff3c';
+    g.strokeStyle = col; g.fillStyle = col; g.shadowColor = col;
     if (st.pts.length === 1) { g.beginPath(); g.arc(st.pts[0][0] * w, st.pts[0][1] * h, 2.5, 0, Math.PI * 2); g.fill(); continue; }
     g.beginPath();
     st.pts.forEach(([x, y], i) => i ? g.lineTo(x * w, y * h) : g.moveTo(x * w, y * h));
@@ -1819,7 +1948,8 @@ function renderLib() {
     const nameEl = txt.querySelector('b');
     nameEl.textContent = it.name;
     if (it.draft) { const d = document.createElement('span'); d.className = 'draft'; d.textContent = 'brouillon'; nameEl.appendChild(d); }
-    txt.querySelectorAll('small')[0].textContent = `${(SOUNDS[it.sound] || SOUNDS.retro).label} · ${it.bpm} BPM`;
+    const used = [...new Set(it.strokes.map(st => st.inst || it.sound))].filter(k => SOUNDS[k]).map(k => SOUNDS[k].label);
+    txt.querySelectorAll('small')[0].textContent = `${used.join(' + ') || SOUNDS.retro.label} · ${it.bpm} BPM`;
     txt.querySelectorAll('small')[1].textContent = fmtDate(it.updated || it.created);
     b.append(cv, txt);
     b.addEventListener('click', () => { initAudio(); openCreation(it.id); });
@@ -1891,8 +2021,19 @@ function buildSwatches(box, list, keyName) {
 }
 function setColor(keyName, c) {
   state[keyName] = c;
+  if (keyName === 'neon') { state.instColors[state.sound] = c; layerDirty = true; }
   document.documentElement.style.setProperty(keyName === 'neon' ? '--neon' : '--head', c);
-  if (keyName === 'neon') layerDirty = true;
+  save();
+}
+// Instrument du prochain trait (et sa couleur)
+function setBrush(inst) {
+  if (!SOUNDS[inst]) inst = 'retro';
+  state.sound = inst;
+  state.neon = instColor(inst);
+  document.documentElement.style.setProperty('--neon', state.neon);
+  $('#selSound').value = inst;
+  $('#swInstName').textContent = `« ${SOUNDS[inst].label} »`;
+  buildSwatches($('#swNeon'), NEONS, 'neon');
   save();
 }
 function bindSeg(id, keyName, after) {
@@ -1910,11 +2051,12 @@ function drawThumb(cv, def) {
   g.strokeStyle = 'rgba(255,255,255,0.06)';
   for (let i = 1; i < 8; i++) { g.beginPath(); g.moveTo(i * w / 8, 0); g.lineTo(i * w / 8, h); g.stroke(); }
   g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 3;
-  g.strokeStyle = state.neon; g.shadowColor = state.neon; g.shadowBlur = 6;
+  const tc = instColor(def.sound);
+  g.strokeStyle = tc; g.shadowColor = tc; g.shadowBlur = 6;
   for (const s of templateStrokesNorm(def)) {
     const y0 = GT - 0.04, y1 = GB + 0.04, my = (y) => (y - y0) / (y1 - y0) * h;
     g.beginPath();
-    if (s.pts.length === 1) { g.arc(s.pts[0][0] * w, my(s.pts[0][1]), 2.5, 0, Math.PI * 2); g.fillStyle = state.neon; g.fill(); continue; }
+    if (s.pts.length === 1) { g.arc(s.pts[0][0] * w, my(s.pts[0][1]), 2.5, 0, Math.PI * 2); g.fillStyle = tc; g.fill(); continue; }
     s.pts.forEach(([x, y], i) => i ? g.lineTo(x * w, my(y)) : g.moveTo(x * w, my(y)));
     g.stroke();
   }
@@ -1938,13 +2080,13 @@ function buildTemplateList() {
 }
 
 function initUI() {
-  fillSelect($('#selSound'), ['retro', 'glide', 'chip', 'pad', 'pluck', 'marimba'].map(k => [k, SOUNDS[k].label]));
+  fillSelect($('#selSound'), INST_ORDER.map(k => [k, SOUNDS[k].label]));
   fillSelect($('#selDrums'), Object.entries(DRUMS).map(([k, v]) => [k, v.label]));
   fillSelect($('#selScale'), Object.entries(SCALES).map(([k, v]) => [k, v.label]));
   fillSelect($('#selKey'), NOTE_NAMES.map((n, i) => [String(i), n]));
   applySettingsUI();
-  setColor('neon', state.neon); setColor('head', state.head);
-  buildSwatches($('#swNeon'), NEONS, 'neon');
+  setColor('head', state.head);
+  setBrush(state.sound);
   buildSwatches($('#swHead'), HEADS, 'head');
   bindSeg('#segSmooth', 'smooth', () => trackers.length = 0);
   bindSeg('#segPinch', 'pinch');
@@ -1952,8 +2094,14 @@ function initUI() {
   buildTemplateList();
 
   $('#selSound').addEventListener('change', (e) => {
-    state.sound = e.target.value; markDirty(); initAudio();
-    SOUNDS[state.sound].play(fx, midiFreq(ROWS[7]), ac.currentTime + 0.02, 0.3, 0.8); // aperçu
+    const inst = e.target.value;
+    setBrush(inst); initAudio();
+    SOUNDS[inst].play(fx, midiFreq(ROWS[7]), ac.currentTime + 0.02, 0.3, 0.8); // aperçu
+    const idx = state.mode === 'move' && selected ? state.strokes.indexOf(selected) : -1;
+    if (idx >= 0) { // en mode Déplacer : la forme sélectionnée change d'instrument
+      const copy = { ...selected, inst }, next = state.strokes.slice(); next[idx] = copy; selected = copy;
+      commit(next); toast(`Forme passée en ${SOUNDS[inst].label}`);
+    } else toast(`Prochain trait : ${SOUNDS[inst].label}`);
   });
   $('#selDrums').addEventListener('change', (e) => { state.drums = e.target.value; markDirty(); });
   $('#selScale').addEventListener('change', (e) => { state.scale = e.target.value; stringsChanged(); });
@@ -1965,6 +2113,15 @@ function initUI() {
   $('#btnUndo').addEventListener('click', undo);
   $('#btnMetro').addEventListener('click', () => { initAudio(); state.metro = !state.metro; $('#btnMetro').setAttribute('aria-pressed', String(state.metro)); save(); if (state.metro && !state.playing) setPlaying(true); });
   $('#btnMetro').setAttribute('aria-pressed', String(state.metro));
+  const mv = $('#metroVol'), mvo = $('#metroVolVal');
+  mv.value = state.metroVol; mvo.textContent = state.metroVol + ' %';
+  let mvTimer = 0;
+  mv.addEventListener('input', () => {
+    state.metroVol = Number(mv.value); mvo.textContent = state.metroVol + ' %'; save();
+    if (metroOut) metroOut.gain.value = metroGain();
+    clearTimeout(mvTimer); // petit clic d'essai quand on relâche le curseur
+    mvTimer = setTimeout(() => { initAudio(); metroClick(ac.currentTime + 0.02, true); }, 120);
+  });
   $('#btnMove').addEventListener('click', () => setMode(state.mode === 'move' ? 'draw' : 'move'));
   $('#btnClear').addEventListener('click', clearAll);
   $('#btnColors').addEventListener('click', () => togglePanel('#popColors'));
@@ -1988,7 +2145,7 @@ function initUI() {
   $('#bnClose').addEventListener('click', closeTemplate);
   $('#bnAuto').addEventListener('click', () => {
     if (!template) return;
-    commit(template.strokes.map(s => ({ pts: s.pts.map(p => p.slice()) })));
+    commit(template.strokes.map(s => ({ pts: s.pts.map(p => p.slice()), inst: s.inst })));
   });
   $('#bnListen').addEventListener('click', (e) => {
     initAudio(); previewGuide = !previewGuide;
@@ -2013,11 +2170,19 @@ function initUI() {
     else if (e.key === 'Home') { seekTo(0); }
     else if (k === 't') $('#btnMetro').click();
     else if (k === 'v') $('#btnMove').click();
+    else if (state.mode === 'move' && e.key.startsWith('Arrow') && e.shiftKey) {
+      // Maj + flèches : étirer ou resserrer dans un seul sens
+      e.preventDefault();
+      const d = { ArrowLeft: [0.9, 1], ArrowRight: [1.1, 1], ArrowUp: [1, 1.1], ArrowDown: [1, 0.9] }[e.key];
+      scaleSelected(d[0], d[1]);
+    }
     else if (state.mode === 'move' && e.key.startsWith('Arrow')) {
       e.preventDefault();
       const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
       nudge(d[0], d[1]);
     }
+    else if (state.mode === 'move' && (e.key === '+' || e.key === '=')) { e.preventDefault(); scaleSelected(1.1, 1.1); }
+    else if (state.mode === 'move' && (e.key === '-' || e.key === '_')) { e.preventDefault(); scaleSelected(1 / 1.1, 1 / 1.1); }
     else if (e.key === 'Escape') { closePanels(); $('#recModal').hidden = true; if (state.mode === 'move') setMode('draw'); }
   });
 
