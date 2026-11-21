@@ -12,10 +12,11 @@ Dessine de la musique dans l'air avec ta webcam. Tu pinces le pouce et l'index p
 - 5 morceaux modèles avec traces guides en pointillés, score de suivi et bouton « Tracer pour moi ».
 - Couleur des néons et de la barre de lecture au choix.
 - Enregistrement vidéo (MP4 ou WebM selon le navigateur) et export audio WAV de 4 boucles.
+- Bibliothèque : enregistrer ses créations (dessin, son, gamme, tempo, couleurs), les rouvrir, renommer, supprimer. Brouillon automatique avant d'effacer ou d'ouvrir autre chose. Export et import en fichier .json pour sauvegarder ou partager.
 - Sans caméra : dessin à la souris.
 
 Barre de lecture : tire-la (poignée en haut) à la souris, ou en pause en la pinçant, pour repartir d'où tu veux.
 
-Raccourcis : Espace lecture/pause, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles.
+Raccourcis : Espace lecture/pause, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles, B bibliothèque, Ctrl/Cmd+S enregistrer la création.
 
 Tout tourne dans le navigateur : l'image de la caméra n'est envoyée nulle part.

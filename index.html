@@ -139,14 +139,39 @@ button { cursor: pointer; }
 .pop .note { margin: 0; font-size: 12px; color: var(--muted); }
 
 /* ---------- modèles ---------- */
-#drawer {
+#drawer, #libDrawer {
   position: fixed; z-index: 7; top: 62px; right: max(16px, env(safe-area-inset-right, 0px));
   width: min(340px, calc(100vw - 32px)); max-height: calc(100% - 160px); overflow: auto;
   border-radius: 18px; padding: 16px; background: var(--glass-strong);
 }
-#drawer header { display: flex; justify-content: space-between; align-items: center; }
-#drawer h2 { margin: 0; font: 700 16px/1.2 var(--font-display); }
+#drawer header, #libDrawer header { display: flex; justify-content: space-between; align-items: center; }
+#drawer h2, #libDrawer h2 { margin: 0; font: 700 16px/1.2 var(--font-display); }
 #drawer p { margin: 6px 0 12px; color: var(--muted); font-size: 13px; }
+/* bibliothèque */
+.libsave { display: grid; gap: 8px; margin: 12px 0 14px; padding: 12px; border-radius: 12px; border: 1px solid var(--faint); background: rgba(255,255,255,0.03); }
+.libsave input {
+  width: 100%; height: 38px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--faint); background: rgba(0,0,0,0.25);
+  font-weight: 600; user-select: text; -webkit-user-select: text;
+}
+.libsave .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.primary.sm { height: 34px; padding: 0 16px; font-size: 13px; box-shadow: none; }
+#libState, .libnote { margin: 0; font-size: 12px; color: var(--muted); }
+#libState.warn { color: #ffb02e; }
+#libList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.libItem { border-radius: 12px; }
+.libItem.current .tpl { border-color: var(--neon); }
+.libItem .tpl b { overflow-wrap: anywhere; }
+.libItem .draft { font: 500 10px/1 var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; color: #ffb02e; margin-left: 6px; }
+.libActions { display: flex; gap: 4px; padding: 4px 4px 0; flex-wrap: wrap; }
+.libActions button { border: 0; background: none; color: var(--muted); font-size: 12px; font-weight: 600; padding: 4px 6px; border-radius: 6px; }
+.libActions button:hover { color: var(--ink); background: rgba(255,255,255,0.06); }
+.libActions button.danger { color: #ff8a8a; }
+.libActions button.confirm { background: var(--rec); color: #fff; }
+.libRename { width: 100%; height: 30px; padding: 0 8px; border-radius: 8px; border: 1px solid var(--neon); background: rgba(0,0,0,0.3); font-weight: 700; user-select: text; -webkit-user-select: text; }
+#libEmpty { margin: 4px 0 8px; font-size: 13px; color: var(--muted); }
+.libfoot { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--faint); display: grid; gap: 8px; }
+.libfoot .row { display: flex; gap: 8px; flex-wrap: wrap; }
+.mini.file { display: inline-flex; align-items: center; cursor: pointer; }
 #tplList { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .tpl {
   width: 100%; display: grid; grid-template-columns: 92px 1fr; gap: 12px; align-items: center; text-align: left;
@@ -248,6 +273,10 @@ button { cursor: pointer; }
     <span id="status" class="chip glass"><i></i><span id="statusText">Prêt</span></span>
   </div>
   <div class="actions">
+    <button id="btnLib" class="pill glass" title="Ma bibliothèque (B). Ctrl+S pour enregistrer.">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3h12v18l-6-4-6 4z"/></svg>
+      <span class="lbl">Bibliothèque</span>
+    </button>
     <button id="btnTemplates" class="pill glass" title="Morceaux modèles (M)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
       <span class="lbl">Modèles</span>
@@ -277,6 +306,31 @@ button { cursor: pointer; }
   </header>
   <p>Choisis un morceau, puis repasse sur les pointillés en pinçant les doigts.</p>
   <ul id="tplList"></ul>
+</aside>
+
+<!-- Bibliothèque -->
+<aside id="libDrawer" class="glass" hidden aria-label="Ma bibliothèque">
+  <header>
+    <h2>Bibliothèque</h2>
+    <button id="libClose" class="icon" title="Fermer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+  </header>
+  <div class="libsave">
+    <input id="libName" type="text" maxlength="60" placeholder="Nom de ta création" aria-label="Nom de ta création">
+    <div class="row">
+      <button id="libSave" class="primary sm">Enregistrer</button>
+      <button id="libSaveNew" class="mini" hidden>Enregistrer comme nouvelle</button>
+    </div>
+    <p id="libState"></p>
+  </div>
+  <p id="libEmpty">Rien pour l'instant. Dessine, puis enregistre ta création ici : le dessin, le son, la gamme, le tempo et les couleurs sont gardés.</p>
+  <ul id="libList"></ul>
+  <div class="libfoot">
+    <div class="row">
+      <button id="libExportAll" class="mini">Sauvegarder tout en fichier</button>
+      <label class="mini file">Importer un fichier<input type="file" id="libImport" accept=".json,application/json" hidden></label>
+    </div>
+    <p class="libnote">Ta bibliothèque est gardée dans ce navigateur. Sauvegarde-la en fichier de temps en temps, ou envoie un fichier à quelqu'un pour qu'il l'importe.</p>
+  </div>
 </aside>
 
 <div id="hint" class="glass">Pince le pouce et l'index pour dessiner. La barre lumineuse joue tes traits.</div>
@@ -397,6 +451,8 @@ const state = {
   bpm: 100, sound: 'retro', drums: 'off', scale: 'penta-mineure', key: 0,
   neon: NEONS[0], head: HEADS[0], showCam: true, smooth: 1, pinch: 1,
   playing: true,
+  libId: null,          // création de la bibliothèque actuellement ouverte
+  unsaved: false,       // modifications pas encore enregistrées dans la bibliothèque
 };
 let history = [];
 let template = null;     // { def, strokes, score, samples }
@@ -410,8 +466,9 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
-    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch']) if (k in s) state[k] = s[k];
+    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved']) if (k in s) state[k] = s[k];
     if (Array.isArray(s.strokes)) state.strokes = s.strokes.filter(st => Array.isArray(st.pts) && st.pts.length);
+    if (!('unsaved' in s)) state.unsaved = state.strokes.length > 0; // dessin d'avant la bibliothèque
     if (!SOUNDS[state.sound]) state.sound = 'retro';
     if (!DRUMS[state.drums]) state.drums = 'off';
     if (!SCALES[state.scale]) state.scale = 'penta-mineure';
@@ -787,7 +844,11 @@ function commit(next) {
   stringsChanged();
 }
 function stringsChanged() {
-  layerDirty = true; scoreDirty = true; rescore(); save(); updateHint(); updateCoverage();
+  layerDirty = true; scoreDirty = true; rescore(); markDirty(); save(); updateHint(); updateCoverage();
+}
+function markDirty() {
+  if (state.strokes.length) state.unsaved = true;
+  save(); updateLibState();
 }
 function undo() {
   if (!history.length) { toast('Rien à annuler'); return; }
@@ -796,7 +857,10 @@ function undo() {
 }
 function clearAll() {
   if (!state.strokes.length) return;
+  protectCurrent();
+  state.libId = null;
   commit([]);
+  state.unsaved = false; save(); updateLibState();
   toast('Tout est effacé. Z pour annuler.');
 }
 const nowS = () => performance.now() / 1000;
@@ -930,8 +994,11 @@ function openTemplate(def) {
   applySettingsUI();
   const strokes = templateStrokesNorm(def);
   template = { def, strokes, score: buildScore(strokes), samples: sampleGuide(strokes), done: false };
+  protectCurrent();
+  state.libId = null;
   if (state.strokes.length) commit([]);
   else stringsChanged();
+  state.unsaved = false; updateLibState();
   previewGuide = false; $('#bnListen').setAttribute('aria-pressed', 'false');
   $('#bnName').textContent = def.name;
   $('#banner').hidden = false;
@@ -1497,13 +1564,183 @@ function encodeWav(buf) {
   return new Blob([dv], { type: 'audio/wav' });
 }
 
+/* ---------------- bibliothèque ---------------- */
+const LIB_KEY = 'neonmano.lib.v1';
+let library = [];
+function loadLib() {
+  try { const v = JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); library = Array.isArray(v) ? v : []; }
+  catch (e) { library = []; }
+}
+function saveLib() {
+  try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); return true; }
+  catch (e) { toast('Le stockage du navigateur est plein : sauvegarde tout en fichier, puis supprime des créations'); return false; }
+}
+const pad2 = (n) => String(n).padStart(2, '0');
+function defaultName(prefix = 'Création') {
+  const d = new Date();
+  return `${prefix} du ${d.getDate()}.${d.getMonth() + 1} à ${d.getHours()}h${pad2(d.getMinutes())}`;
+}
+function fmtDate(ms) {
+  const d = new Date(ms);
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+}
+function snapshot() {
+  return {
+    strokes: state.strokes.map(st => ({ pts: st.pts.map(p => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4]) })),
+    sound: state.sound, scale: state.scale, key: state.key, bpm: state.bpm, drums: state.drums, neon: state.neon, head: state.head,
+  };
+}
+const newId = () => 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+const currentItem = () => library.find(i => i.id === state.libId) || null;
+function saveCreation(asNew) {
+  if (!state.strokes.length) { toast('Dessine d’abord quelque chose'); return; }
+  const now = Date.now(), typed = $('#libName').value.trim();
+  let item = asNew ? null : currentItem();
+  if (item) Object.assign(item, snapshot(), { name: typed || item.name, updated: now, draft: false });
+  else { item = { id: newId(), name: typed || defaultName(), created: now, updated: now, ...snapshot() }; library.unshift(item); }
+  if (!saveLib()) return;
+  state.libId = item.id; state.unsaved = false; save();
+  renderLib();
+  toast(`« ${item.name} » est enregistrée`);
+}
+// Avant d'effacer ou d'ouvrir autre chose : un travail non enregistré part en brouillon.
+function protectCurrent() {
+  if (!state.strokes.length || !state.unsaved) return;
+  const now = Date.now();
+  library.unshift({ id: newId(), name: defaultName('Brouillon'), created: now, updated: now, draft: true, ...snapshot() });
+  if (saveLib()) { state.unsaved = false; renderLib(); setTimeout(() => toast('Ton dessin non enregistré est gardé en brouillon dans la Bibliothèque'), 2500); }
+}
+function openCreation(id) {
+  const it = library.find(i => i.id === id);
+  if (!it) return;
+  protectCurrent();
+  if (template) closeTemplate();
+  if (SOUNDS[it.sound]) state.sound = it.sound;
+  if (SCALES[it.scale]) state.scale = it.scale;
+  if (DRUMS[it.drums]) state.drums = it.drums;
+  state.key = Number(it.key) || 0; state.bpm = clamp(Number(it.bpm) || 100, 50, 180);
+  ROWS = noteRows();
+  applySettingsUI();
+  if (it.neon) setColor('neon', it.neon);
+  if (it.head) setColor('head', it.head);
+  buildSwatches($('#swNeon'), NEONS, 'neon'); buildSwatches($('#swHead'), HEADS, 'head');
+  commit(it.strokes.map(st => ({ pts: st.pts.map(p => p.slice()) })));
+  state.libId = it.id; state.unsaved = false; save();
+  renderLib(); closePanels();
+  if (!state.playing) setPlaying(true);
+  toast(`« ${it.name} » est ouverte`);
+}
+function slug(name) {
+  return name.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'creation';
+}
+function exportItems(items, fname) {
+  const data = { app: 'neon-mano', version: 1, exported: new Date().toISOString(), items };
+  download(new Blob([JSON.stringify(data)], { type: 'application/json' }), fname);
+}
+function validItem(it) {
+  return it && Array.isArray(it.strokes) && it.strokes.every(st => Array.isArray(st.pts) && st.pts.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)));
+}
+async function importFile(file) {
+  try {
+    const data = JSON.parse(await file.text());
+    const items = (Array.isArray(data.items) ? data.items : [data]).filter(validItem);
+    if (!items.length) throw new Error('vide');
+    const ids = new Set(library.map(i => i.id));
+    for (const it of items.reverse()) {
+      const copy = { ...it, name: String(it.name || defaultName()).slice(0, 60) };
+      if (!copy.id || ids.has(copy.id)) copy.id = newId();
+      copy.created = copy.created || Date.now(); copy.updated = copy.updated || copy.created;
+      library.unshift(copy); ids.add(copy.id);
+    }
+    if (saveLib()) { renderLib(); toast(`${items.length} création${items.length > 1 ? 's importées' : ' importée'}`); }
+  } catch (e) {
+    toast('Ce fichier n’est pas une création Néon Mano');
+  }
+}
+function drawCreationThumb(cv, it) {
+  const g = cv.getContext('2d'), w = cv.width, h = cv.height, col = it.neon || state.neon;
+  g.fillStyle = '#0b0d12'; g.fillRect(0, 0, w, h);
+  g.lineCap = 'round'; g.lineJoin = 'round'; g.lineWidth = 3;
+  g.strokeStyle = col; g.fillStyle = col; g.shadowColor = col; g.shadowBlur = 6;
+  for (const st of it.strokes) {
+    if (st.pts.length === 1) { g.beginPath(); g.arc(st.pts[0][0] * w, st.pts[0][1] * h, 2.5, 0, Math.PI * 2); g.fill(); continue; }
+    g.beginPath();
+    st.pts.forEach(([x, y], i) => i ? g.lineTo(x * w, y * h) : g.moveTo(x * w, y * h));
+    g.stroke();
+  }
+}
+function updateLibState() {
+  const el = $('#libState'), it = currentItem();
+  if (!el) return;
+  $('#libSave').textContent = it ? 'Mettre à jour' : 'Enregistrer';
+  $('#libSaveNew').hidden = !it;
+  el.classList.toggle('warn', state.unsaved && state.strokes.length > 0);
+  if (!state.strokes.length) el.textContent = 'Ton dessin est vide.';
+  else if (it) el.textContent = state.unsaved ? `« ${it.name} » : modifications non enregistrées` : `« ${it.name} » est enregistrée`;
+  else el.textContent = 'Ton dessin actuel n’est pas encore enregistré.';
+}
+function renderLib() {
+  const ul = $('#libList'); ul.innerHTML = '';
+  $('#libEmpty').hidden = library.length > 0;
+  for (const it of library) {
+    const li = document.createElement('li');
+    li.className = 'libItem' + (it.id === state.libId ? ' current' : '');
+    const b = document.createElement('button'); b.className = 'tpl'; b.title = 'Ouvrir';
+    const cv = document.createElement('canvas'); cv.width = 184; cv.height = 112;
+    const txt = document.createElement('div');
+    txt.innerHTML = '<b></b><small></small><small class="meta"></small>';
+    const nameEl = txt.querySelector('b');
+    nameEl.textContent = it.name;
+    if (it.draft) { const d = document.createElement('span'); d.className = 'draft'; d.textContent = 'brouillon'; nameEl.appendChild(d); }
+    txt.querySelectorAll('small')[0].textContent = `${(SOUNDS[it.sound] || SOUNDS.retro).label} · ${it.bpm} BPM`;
+    txt.querySelectorAll('small')[1].textContent = fmtDate(it.updated || it.created);
+    b.append(cv, txt);
+    b.addEventListener('click', () => { initAudio(); openCreation(it.id); });
+    const acts = document.createElement('div'); acts.className = 'libActions';
+    const mk = (label, fn, cls = '') => { const x = document.createElement('button'); x.textContent = label; x.className = cls; x.addEventListener('click', fn); acts.appendChild(x); return x; };
+    mk('Renommer', () => {
+      const inp = document.createElement('input'); inp.className = 'libRename'; inp.value = it.name; inp.maxLength = 60;
+      inp.id = 'rename-' + it.id; inp.setAttribute('aria-label', 'Nouveau nom');
+      const done = (ok) => {
+        if (ok && inp.value.trim()) { it.name = inp.value.trim(); it.draft = false; saveLib(); }
+        renderLib(); updateLibState();
+      };
+      inp.addEventListener('keydown', (e) => { e.stopPropagation(); if (e.key === 'Enter') done(true); if (e.key === 'Escape') done(false); });
+      inp.addEventListener('blur', () => done(true));
+      acts.replaceWith(inp); inp.focus(); inp.select();
+    });
+    mk('Exporter', () => exportItems([it], `${new Date(it.created).toISOString().slice(0, 10)}-neon-mano-${slug(it.name)}.json`));
+    const del = mk('Supprimer', () => {
+      if (!del.classList.contains('confirm')) {
+        del.classList.add('confirm'); del.textContent = 'Confirmer la suppression';
+        setTimeout(() => { if (del.isConnected) { del.classList.remove('confirm'); del.textContent = 'Supprimer'; } }, 3000);
+        return;
+      }
+      library = library.filter(x => x.id !== it.id);
+      if (state.libId === it.id) { state.libId = null; if (state.strokes.length) state.unsaved = true; save(); }
+      saveLib(); renderLib(); updateLibState();
+      toast(`« ${it.name} » est supprimée`);
+    }, 'danger');
+    li.append(b, acts); ul.appendChild(li);
+    drawCreationThumb(cv, it);
+  }
+  updateLibState();
+}
+function openLib() {
+  const it = currentItem();
+  $('#libName').value = it ? it.name : '';
+  $('#libName').placeholder = defaultName();
+  renderLib();
+  togglePanel('#libDrawer');
+}
+
 /* ---------------- interface ---------------- */
 function fillSelect(sel, entries) {
   sel.innerHTML = '';
   for (const [v, label] of entries) { const o = document.createElement('option'); o.value = v; o.textContent = label; sel.appendChild(o); }
 }
 function closePanels(except) {
-  for (const id of ['#popColors', '#popSettings', '#drawer']) if (id !== except) $(id).hidden = true;
+  for (const id of ['#popColors', '#popSettings', '#drawer', '#libDrawer']) if (id !== except) $(id).hidden = true;
 }
 function togglePanel(id) { const el = $(id); const show = el.hidden; closePanels(id); el.hidden = !show; }
 
@@ -1515,12 +1752,12 @@ function buildSwatches(box, list, keyName) {
   for (const c of list) {
     const b = document.createElement('button');
     b.className = 'sw'; b.style.background = c; b.dataset.c = c; b.title = c;
-    b.addEventListener('click', () => { setColor(keyName, c); render(); });
+    b.addEventListener('click', () => { setColor(keyName, c); render(); markDirty(); });
     box.appendChild(b);
   }
   const lab = document.createElement('label'); lab.className = 'sw-custom'; lab.title = 'Couleur personnalisée';
   const inp = document.createElement('input'); inp.type = 'color'; inp.value = state[keyName]; inp.id = 'custom-' + keyName;
-  inp.addEventListener('input', () => { setColor(keyName, inp.value); render(); });
+  inp.addEventListener('input', () => { setColor(keyName, inp.value); render(); markDirty(); });
   const plus = document.createElement('span'); plus.textContent = '+';
   lab.append(inp, plus); box.appendChild(lab);
   render();
@@ -1588,13 +1825,13 @@ function initUI() {
   buildTemplateList();
 
   $('#selSound').addEventListener('change', (e) => {
-    state.sound = e.target.value; save(); initAudio();
+    state.sound = e.target.value; markDirty(); initAudio();
     SOUNDS[state.sound].play(fx, midiFreq(ROWS[7]), ac.currentTime + 0.02, 0.3, 0.8); // aperçu
   });
-  $('#selDrums').addEventListener('change', (e) => { state.drums = e.target.value; save(); });
+  $('#selDrums').addEventListener('change', (e) => { state.drums = e.target.value; markDirty(); });
   $('#selScale').addEventListener('change', (e) => { state.scale = e.target.value; stringsChanged(); });
   $('#selKey').addEventListener('change', (e) => { state.key = Number(e.target.value); stringsChanged(); });
-  const bpm = (d) => { state.bpm = clamp(state.bpm + d, 50, 180); applySettingsUI(); save(); };
+  const bpm = (d) => { state.bpm = clamp(state.bpm + d, 50, 180); applySettingsUI(); markDirty(); };
   $('#bpmDown').addEventListener('click', () => bpm(-4));
   $('#bpmUp').addEventListener('click', () => bpm(4));
   $('#btnPlay').addEventListener('click', () => { initAudio(); setPlaying(!state.playing); });
@@ -1603,6 +1840,16 @@ function initUI() {
   $('#btnColors').addEventListener('click', () => togglePanel('#popColors'));
   $('#btnSettings').addEventListener('click', () => togglePanel('#popSettings'));
   $('#btnTemplates').addEventListener('click', () => togglePanel('#drawer'));
+  $('#btnLib').addEventListener('click', openLib);
+  $('#libClose').addEventListener('click', () => closePanels());
+  $('#libSave').addEventListener('click', () => saveCreation(false));
+  $('#libSaveNew').addEventListener('click', () => saveCreation(true));
+  $('#libName').addEventListener('keydown', (e) => { if (e.key === 'Enter') saveCreation(false); });
+  $('#libExportAll').addEventListener('click', () => {
+    if (!library.length) { toast('La bibliothèque est vide'); return; }
+    exportItems(library, `${today()}-neon-mano-bibliotheque.json`);
+  });
+  $('#libImport').addEventListener('change', (e) => { const f = e.target.files[0]; if (f) importFile(f); e.target.value = ''; });
   $('#drawerClose').addEventListener('click', () => closePanels());
   $('#btnRec').addEventListener('click', toggleRec);
   $('#btnWav').addEventListener('click', () => { initAudio(); exportWav(); });
@@ -1623,11 +1870,13 @@ function initUI() {
     if (e.target.closest && e.target.closest('select, input')) return;
     if (!$('#intro').hidden) return;
     const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); saveCreation(false); return; }
     if (e.code === 'Space') { e.preventDefault(); initAudio(); setPlaying(!state.playing); }
     else if (k === 'z' || ((e.metaKey || e.ctrlKey) && k === 'z')) { e.preventDefault(); undo(); }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearAll(); }
     else if (k === 'r') toggleRec();
     else if (k === 'm') togglePanel('#drawer');
+    else if (k === 'b') openLib();
     else if (e.key === 'Home') { seekTo(0); }
     else if (e.key === 'Escape') { closePanels(); $('#recModal').hidden = true; }
   });
@@ -1658,6 +1907,7 @@ function initUI() {
 }
 
 load();
+loadLib();
 ROWS = noteRows();
 score = buildScore(state.strokes);
 resize();
