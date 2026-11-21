@@ -104,6 +104,9 @@ button { cursor: pointer; }
 .tempo .row { display: flex; align-items: center; gap: 4px; }
 .tempo button { width: 22px; height: 22px; border-radius: 7px; border: 1px solid var(--faint); background: transparent; line-height: 1; }
 .tempo button:hover { border-color: rgba(255,255,255,0.35); }
+.toggle[aria-pressed="true"] { background: rgba(255,255,255,0.12); color: var(--neon); }
+#btnMetro.tick svg { filter: drop-shadow(0 0 6px var(--neon)); color: #fff; }
+#btnMetro.tick.accent svg { transform: scale(1.12); }
 .tempo output { min-width: 30px; text-align: center; font: 700 14px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
 .swatchbtn { position: relative; }
 .swatchbtn .dot { position: absolute; width: 14px; height: 14px; border-radius: 50%; border: 2px solid rgba(0,0,0,0.5); }
@@ -354,6 +357,13 @@ button { cursor: pointer; }
   </div>
   <label class="field" for="selDrums"><span>Batterie</span><select id="selDrums"></select></label>
   <span class="sep"></span>
+  <button id="btnMetro" class="icon toggle" title="Métronome (T) : un clic sur chaque temps, absent des enregistrements" aria-label="Métronome" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5z"/><path d="M12 15l5-8"/><path d="M7 15h10"/></svg>
+  </button>
+  <button id="btnMove" class="icon toggle" title="Déplacer les formes (V). Flèches : un pas ou une note." aria-label="Déplacer les formes" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M3 12h18"/><path d="m9 6 3-3 3 3M9 18l3 3 3-3M6 9l-3 3 3 3M18 9l3 3-3 3"/></svg>
+  </button>
+  <span class="sep"></span>
   <button id="btnColors" class="icon swatchbtn" title="Couleurs" aria-label="Couleurs"><i class="dot n"></i><i class="dot h"></i></button>
   <button id="btnSettings" class="icon" title="Réglages" aria-label="Réglages">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></svg>
@@ -451,6 +461,8 @@ const state = {
   bpm: 100, sound: 'retro', drums: 'off', scale: 'penta-mineure', key: 0,
   neon: NEONS[0], head: HEADS[0], showCam: true, smooth: 1, pinch: 1,
   playing: true,
+  metro: false,         // métronome
+  mode: 'draw',         // 'draw' ou 'move'
   libId: null,          // création de la bibliothèque actuellement ouverte
   unsaved: false,       // modifications pas encore enregistrées dans la bibliothèque
 };
@@ -466,7 +478,7 @@ function load() {
     const raw = localStorage.getItem(STORE_KEY);
     if (!raw) return;
     const s = JSON.parse(raw);
-    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved']) if (k in s) state[k] = s[k];
+    for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved','metro']) if (k in s) state[k] = s[k];
     if (Array.isArray(s.strokes)) state.strokes = s.strokes.filter(st => Array.isArray(st.pts) && st.pts.length);
     if (!('unsaved' in s)) state.unsaved = state.strokes.length > 0; // dessin d'avant la bibliothèque
     if (!SOUNDS[state.sound]) state.sound = 'retro';
@@ -798,12 +810,33 @@ function scheduler() {
     if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, state.sound, 'off', state.bpm, 0.55);
     if (state.sound === 'glide') { for (const g of score.glides[nextStep]) hits.push({ time: nextTime + g.off * stepDur() / SUB, step: nextStep, row: yToRow(g.ys[0]) }); }
     else for (const e of score[nextStep]) hits.push({ time: nextTime, step: nextStep, row: e.row });
+    if (state.metro && nextStep % 4 === 0) metroClick(nextTime, nextStep % 16 === 0);
     timeline.push({ step: nextStep, time: nextTime, dur: stepDur() });
     nextTime += stepDur();
     nextStep = (nextStep + 1) % STEPS;
   }
   while (timeline.length > 64) timeline.shift();
   while (hits.length > 80) hits.shift();
+}
+// Métronome : branché directement sur les haut-parleurs, donc absent des vidéos et du WAV.
+let metroOut = null, lastBeat = { time: -1, accent: false };
+function metroClick(t, accent) {
+  if (!metroOut) { metroOut = ac.createGain(); metroOut.gain.value = 0.5; metroOut.connect(ac.destination); }
+  const o = ac.createOscillator(), g = ac.createGain();
+  o.type = 'sine'; o.frequency.value = accent ? 1760 : 1175;
+  g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(accent ? 0.5 : 0.3, t + 0.002);
+  g.gain.setTargetAtTime(0, t + 0.004, 0.018);
+  o.connect(g); g.connect(metroOut); o.start(t); o.stop(t + 0.12);
+  metroBeats.push({ time: t, accent });
+}
+const metroBeats = [];
+function metroVisual() {
+  if (!ac) return;
+  const now = ac.currentTime;
+  while (metroBeats.length && metroBeats[0].time <= now) lastBeat = metroBeats.shift();
+  const on = state.metro && now - lastBeat.time < 0.11;
+  const b = $('#btnMetro');
+  b.classList.toggle('tick', on); b.classList.toggle('accent', on && lastBeat.accent);
 }
 function playheadPos() {
   if (dragPos !== null) return dragPos;
@@ -1295,6 +1328,7 @@ function frame(nowMs) {
   const t = nowMs / 1000;
   if (!video.requestVideoFrameCallback) detectTick();
   pruneTrackers(t);
+  metroVisual();
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   drawBackground(t);
   drawGrid();
@@ -1304,6 +1338,7 @@ function frame(nowMs) {
   ctx.drawImage(layer, 0, 0);
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   for (const s of active.values()) drawTube(ctx, s.pts, state.neon);
+  drawSelection();
   drawPlayhead(playheadPos(), t);
   drawSparks(dt);
   drawHands();
@@ -1375,10 +1410,14 @@ function onHands(res, t) {
           h.pinch = true; h.cnt = 0; h.firmAt = t;
           // en pause, pincer sur la barre magenta l'attrape au lieu de dessiner
           if (!state.playing && dragPos === null && Math.abs(h.pt[0] - playheadPos()) < 0.03) { h.grab = true; dragPos = clamp(h.pt[0], 0, 0.9999); }
+          else if (state.mode === 'move') { h.moving = !moving && beginMove(key, h.pt[0], h.pt[1]); }
           else startStroke(key, h.pt[0], h.pt[1], t);
         }
       }
       else h.cnt = 0;
+    } else if (state.mode === 'move' && !h.grab && !active.has(key)) {
+      if (ratio > off || !isolated) { if (++h.cnt >= 2) { h.pinch = false; h.cnt = 0; if (h.moving) endMove(); h.moving = false; } }
+      else { h.cnt = 0; if (h.moving) updateMove(h.pt[0], h.pt[1]); }
     } else if (h.grab) {
       if (ratio > off || !isolated) { if (++h.cnt >= 2) { h.pinch = false; h.grab = false; h.cnt = 0; seekTo(dragPos); dragPos = null; } }
       else { h.cnt = 0; dragPos = clamp(h.pt[0], 0, 0.9999); }
@@ -1400,6 +1439,7 @@ function pruneTrackers(t) {
     const h = trackers[i];
     if (t - h.seen > 0.3) {
       if (h.grab) { seekTo(dragPos); dragPos = null; }
+      else if (h.moving) endMove();
       else if (h.pinch) endStroke('hand' + h.id, { hand: true, cutAt: h.firmAt ?? h.seen });
       trackers.splice(i, 1);
       updateStatus();
@@ -1445,11 +1485,13 @@ function setStatus(text, cls) {
   const el = $('#status'); el.classList.toggle('ok', cls === 'ok'); el.classList.toggle('warn', cls === 'warn');
 }
 function updateStatus() {
-  if (mode === 'mouse') return setStatus('Souris : clique et glisse', 'ok');
+  if (mode === 'mouse') return setStatus(state.mode === 'move' ? 'Mode Déplacer : attrape une forme' : 'Souris : clique et glisse', 'ok');
   if (!landmarker) return;
   const n = trackers.length;
   if (!n) setStatus('Montre ta main à la caméra', 'warn');
   else if (trackers.some(h => h.grab)) setStatus('Tu déplaces la barre', 'ok');
+  else if (trackers.some(h => h.moving)) setStatus('Tu déplaces une forme', 'ok');
+  else if (state.mode === 'move') setStatus('Mode Déplacer : pince une forme', 'ok');
   else if (trackers.some(h => h.pinch)) setStatus('Tu dessines', 'ok');
   else setStatus(n > 1 ? '2 mains détectées' : 'Main détectée', 'ok');
 }
@@ -1462,6 +1504,87 @@ function toast(msg) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
 }
 
+/* ---------------- déplacer les formes ---------------- */
+let selected = null;     // trait sélectionné (référence)
+let moving = null;       // { key, idx, base, sx, sy }
+function setMode(m) {
+  state.mode = m;
+  $('#btnMove').setAttribute('aria-pressed', String(m === 'move'));
+  if (m !== 'move') selected = null;
+  canvas.style.cursor = m === 'move' ? 'grab' : 'crosshair';
+  updateStatus(); updateHint();
+  if (m === 'move') toast('Mode Déplacer : attrape une forme. Flèches pour l’ajuster d’un pas ou d’une note.');
+}
+function distToStroke(st, px, py) {
+  const p = st.pts.map(([x, y]) => [x * W, y * H]);
+  if (p.length === 1) return Math.hypot(p[0][0] - px, p[0][1] - py);
+  let best = Infinity;
+  for (let i = 1; i < p.length; i++) {
+    const [ax, ay] = p[i - 1], [bx, by] = p[i], dx = bx - ax, dy = by - ay;
+    const L = dx * dx + dy * dy || 1;
+    const t = clamp(((px - ax) * dx + (py - ay) * dy) / L, 0, 1);
+    best = Math.min(best, Math.hypot(ax + t * dx - px, ay + t * dy - py));
+  }
+  return best;
+}
+function hitStroke(x, y, radius = 26) { // x, y normalisés ; le trait le plus récent gagne à égalité
+  let best = -1, bd = radius;
+  state.strokes.forEach((st, i) => { const d = distToStroke(st, x * W, y * H); if (d <= bd) { bd = d; best = i; } });
+  return best;
+}
+function boundsOf(pts) {
+  let x0 = 1, x1 = 0, y0 = 1, y1 = 0;
+  for (const [x, y] of pts) { x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  return { x0, x1, y0, y1 };
+}
+function shiftedPts(base, dx, dy) {
+  const b = boundsOf(base);
+  dx = clamp(dx, -b.x0, 0.999 - b.x1);
+  dy = clamp(dy, 0.02 - b.y0, 0.98 - b.y1);
+  return base.map(([x, y]) => [x + dx, y + dy]);
+}
+function beginMove(key, x, y) {
+  const idx = hitStroke(x, y);
+  if (idx < 0) { selected = null; return false; }
+  history.push(state.strokes);
+  if (history.length > 120) history.shift();
+  const base = state.strokes[idx].pts;
+  const copy = { pts: base.map(p => p.slice()) };
+  state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
+  selected = copy;
+  moving = { key, idx, base, sx: x, sy: y };
+  layerDirty = true;
+  return true;
+}
+function updateMove(x, y) {
+  if (!moving) return;
+  state.strokes[moving.idx].pts = shiftedPts(moving.base, x - moving.sx, y - moving.sy);
+  layerDirty = true; scoreDirty = true;
+}
+function endMove() {
+  if (!moving) return;
+  moving = null;
+  stringsChanged();
+}
+function nudge(dxSteps, dyRows) {
+  const idx = selected ? state.strokes.indexOf(selected) : -1;
+  if (idx < 0) { toast('Attrape d’abord une forme en mode Déplacer'); return; }
+  const rowH = (GB - GT) / (ROWS.length - 1);
+  const copy = { pts: shiftedPts(selected.pts, dxSteps / STEPS, -dyRows * rowH) };
+  const next = state.strokes.slice(); next[idx] = copy;
+  selected = copy;
+  commit(next);
+}
+function drawSelection() {
+  if (state.mode !== 'move' || !selected || !state.strokes.includes(selected)) return;
+  ctx.save();
+  ctx.setLineDash([5, 7]); ctx.lineDashOffset = -performance.now() / 40;
+  ctx.strokeStyle = 'rgba(255,255,255,0.95)'; ctx.lineWidth = 2; ctx.lineCap = 'round';
+  const b = boundsOf(selected.pts), m = 14;
+  ctx.strokeRect(b.x0 * W - m, b.y0 * H - m, (b.x1 - b.x0) * W + 2 * m, (b.y1 - b.y0) * H + 2 * m);
+  ctx.restore();
+}
+
 /* ---------------- souris ---------------- */
 const nearPlayhead = (x, y) => Math.abs(x - playheadPos() * W) < 14 || (Math.abs(x - playheadPos() * W) < 20 && Math.abs(y - handleY()) < 22);
 let ptrDrag = false;
@@ -1471,16 +1594,20 @@ canvas.addEventListener('pointerdown', (e) => {
   closePanels();
   canvas.setPointerCapture(e.pointerId);
   if (nearPlayhead(e.clientX, e.clientY)) { ptrDrag = true; dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
+  if (state.mode === 'move') { if (beginMove('ptr', e.clientX / W, e.clientY / H)) canvas.style.cursor = 'grabbing'; return; }
   startStroke('ptr', e.clientX / W, e.clientY / H);
   updateHint();
 });
 canvas.addEventListener('pointermove', (e) => {
   if (ptrDrag) { dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
+  if (moving && moving.key === 'ptr') { updateMove(e.clientX / W, e.clientY / H); return; }
   if (active.has('ptr')) { addPoint('ptr', e.clientX / W, e.clientY / H); return; }
-  canvas.style.cursor = nearPlayhead(e.clientX, e.clientY) ? 'ew-resize' : 'crosshair';
+  canvas.style.cursor = nearPlayhead(e.clientX, e.clientY) ? 'ew-resize'
+    : state.mode === 'move' ? (hitStroke(e.clientX / W, e.clientY / H) >= 0 ? 'grab' : 'default') : 'crosshair';
 });
 const endPtr = () => {
   if (ptrDrag) { ptrDrag = false; seekTo(dragPos); dragPos = null; return; }
+  if (moving && moving.key === 'ptr') { endMove(); canvas.style.cursor = 'grab'; return; }
   if (active.has('ptr')) endStroke('ptr');
 };
 canvas.addEventListener('pointerup', endPtr);
@@ -1836,6 +1963,9 @@ function initUI() {
   $('#bpmUp').addEventListener('click', () => bpm(4));
   $('#btnPlay').addEventListener('click', () => { initAudio(); setPlaying(!state.playing); });
   $('#btnUndo').addEventListener('click', undo);
+  $('#btnMetro').addEventListener('click', () => { initAudio(); state.metro = !state.metro; $('#btnMetro').setAttribute('aria-pressed', String(state.metro)); save(); if (state.metro && !state.playing) setPlaying(true); });
+  $('#btnMetro').setAttribute('aria-pressed', String(state.metro));
+  $('#btnMove').addEventListener('click', () => setMode(state.mode === 'move' ? 'draw' : 'move'));
   $('#btnClear').addEventListener('click', clearAll);
   $('#btnColors').addEventListener('click', () => togglePanel('#popColors'));
   $('#btnSettings').addEventListener('click', () => togglePanel('#popSettings'));
@@ -1873,12 +2003,22 @@ function initUI() {
     if ((e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); saveCreation(false); return; }
     if (e.code === 'Space') { e.preventDefault(); initAudio(); setPlaying(!state.playing); }
     else if (k === 'z' || ((e.metaKey || e.ctrlKey) && k === 'z')) { e.preventDefault(); undo(); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && state.mode === 'move' && selected && state.strokes.includes(selected)) {
+      e.preventDefault(); commit(state.strokes.filter(x => x !== selected)); selected = null; toast('Forme supprimée. Z pour annuler.');
+    }
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearAll(); }
     else if (k === 'r') toggleRec();
     else if (k === 'm') togglePanel('#drawer');
     else if (k === 'b') openLib();
     else if (e.key === 'Home') { seekTo(0); }
-    else if (e.key === 'Escape') { closePanels(); $('#recModal').hidden = true; }
+    else if (k === 't') $('#btnMetro').click();
+    else if (k === 'v') $('#btnMove').click();
+    else if (state.mode === 'move' && e.key.startsWith('Arrow')) {
+      e.preventDefault();
+      const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+      nudge(d[0], d[1]);
+    }
+    else if (e.key === 'Escape') { closePanels(); $('#recModal').hidden = true; if (state.mode === 'move') setMode('draw'); }
   });
 
   $('#btnStart').addEventListener('click', async () => {

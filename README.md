@@ -17,6 +17,10 @@ Dessine de la musique dans l'air avec ta webcam. Tu pinces le pouce et l'index p
 
 Barre de lecture : tire-la (poignée en haut) à la souris, ou en pause en la pinçant, pour repartir d'où tu veux.
 
+Déplacer les formes : bouton « Déplacer » (V), puis attraper une forme à la souris ou en la pinçant. Flèches ← → : un pas de rythme, ↑ ↓ : une note. Suppr efface la forme sélectionnée.
+
+Métronome : bouton (T), un clic sur chaque temps, accentué en début de mesure. Il n'apparaît ni dans les vidéos ni dans le WAV.
+
 Raccourcis : Espace lecture/pause, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles, B bibliothèque, Ctrl/Cmd+S enregistrer la création.
 
 Tout tourne dans le navigateur : l'image de la caméra n'est envoyée nulle part.
