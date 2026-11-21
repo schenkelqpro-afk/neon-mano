@@ -14,6 +14,8 @@ Dessine de la musique dans l'air avec ta webcam. Tu pinces le pouce et l'index p
 - Enregistrement vidéo (MP4 ou WebM selon le navigateur) et export audio WAV de 4 boucles.
 - Sans caméra : dessin à la souris.
 
-Raccourcis : Espace lecture/pause, Z annuler, Suppr tout effacer, R enregistrer, M modèles.
+Barre de lecture : tire-la (poignée en haut) à la souris, ou en pause en la pinçant, pour repartir d'où tu veux.
+
+Raccourcis : Espace lecture/pause, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles.
 
 Tout tourne dans le navigateur : l'image de la caméra n'est envoyée nulle part.

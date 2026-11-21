@@ -735,7 +735,7 @@ function stepDur() { return 60 / state.bpm / 4; }
 function scheduler() {
   if (!ac) return;
   if (scoreDirty && performance.now() - lastScoreAt > 70) rescore();
-  if (!state.playing) return;
+  if (!state.playing || dragPos !== null) return;
   while (nextTime < ac.currentTime + 0.12) {
     scheduleStepOn(fx, nextStep, nextTime, score, state.sound, state.drums, state.bpm);
     if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, state.sound, 'off', state.bpm, 0.55);
@@ -749,6 +749,7 @@ function scheduler() {
   while (hits.length > 80) hits.shift();
 }
 function playheadPos() {
+  if (dragPos !== null) return dragPos;
   if (!ac || !timeline.length) return lastPos;
   const now = ac.currentTime;
   for (let i = timeline.length - 1; i >= 0; i--) {
@@ -758,11 +759,21 @@ function playheadPos() {
   return lastPos;
 }
 let lastPos = 0;
+let dragPos = null;      // position de la barre pendant qu'on la tire
+// Repartir d'un endroit précis de la boucle (calé sur le pas le plus proche)
+function seekTo(pos) {
+  pos = clamp(pos, 0, 0.9999);
+  nextStep = Math.round(pos * STEPS) % STEPS;
+  lastPos = nextStep / STEPS;
+  timeline.length = 0; hits.length = 0;
+  if (ac) nextTime = ac.currentTime + 0.04;
+}
 function setPlaying(p) {
   state.playing = p;
   if (p && ac) { ac.resume(); nextTime = ac.currentTime + 0.05; timeline.length = 0; }
-  $('#icoPlay').hidden = p; $('#icoPause').hidden = !p;
+  $('#icoPlay').toggleAttribute('hidden', p); $('#icoPause').toggleAttribute('hidden', !p);
   $('#btnPlay').setAttribute('aria-label', p ? 'Pause' : 'Lecture');
+  if (!p && ac) toast('En pause : tire la barre pour choisir le départ');
 }
 
 /* ---------------- traits ---------------- */
@@ -1112,6 +1123,7 @@ function ball(x, y, r, c, a = 1) {
   ctx.fillStyle = g;
   ctx.beginPath(); ctx.arc(x, y, r * 2.6, 0, Math.PI * 2); ctx.fill();
 }
+const handleY = () => GT * H * 0.72;
 function drawPlayhead(pos, t) {
   const c = hexRgb(state.head), x = pos * W;
   ctx.save();
@@ -1124,6 +1136,14 @@ function drawPlayhead(pos, t) {
   ctx.fillStyle = rgba(c, 1); ctx.fillRect(x - 1.5, 0, 3, H);
   ctx.shadowBlur = 0;
   ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fillRect(x - 0.5, 0, 1, H);
+  // poignée pour tirer la barre
+  const hy = handleY(), grabbed = dragPos !== null;
+  ctx.shadowColor = rgba(c, 1); ctx.shadowBlur = grabbed ? 18 : 8;
+  ctx.fillStyle = rgba(c, 1);
+  ctx.beginPath(); ctx.roundRect(x - 8, hy - 14, 16, 28, 8); ctx.fill();
+  ctx.shadowBlur = 0;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fillRect(x - 3, hy - 6, 1.5, 12); ctx.fillRect(x + 1.5, hy - 6, 1.5, 12);
   ctx.globalCompositeOperation = 'lighter';
   for (const s of allStrokes()) {
     if (s.pts.length === 1) {
@@ -1283,8 +1303,18 @@ function onHands(res, t) {
 
     const key = 'hand' + h.id;
     if (!h.pinch) {
-      if (ratio < on && isolated) { if (++h.cnt >= 3) { h.pinch = true; h.cnt = 0; h.firmAt = t; startStroke(key, h.pt[0], h.pt[1], t); } }
+      if (ratio < on && isolated) {
+        if (++h.cnt >= 3) {
+          h.pinch = true; h.cnt = 0; h.firmAt = t;
+          // en pause, pincer sur la barre magenta l'attrape au lieu de dessiner
+          if (!state.playing && dragPos === null && Math.abs(h.pt[0] - playheadPos()) < 0.03) { h.grab = true; dragPos = clamp(h.pt[0], 0, 0.9999); }
+          else startStroke(key, h.pt[0], h.pt[1], t);
+        }
+      }
       else h.cnt = 0;
+    } else if (h.grab) {
+      if (ratio > off || !isolated) { if (++h.cnt >= 2) { h.pinch = false; h.grab = false; h.cnt = 0; seekTo(dragPos); dragPos = null; } }
+      else { h.cnt = 0; dragPos = clamp(h.pt[0], 0, 0.9999); }
     } else {
       // dernier instant où les doigts étaient bien collés : tout ce qui suit sera coupé au relâchement
       if (ratio < on + 0.06 && isolated) h.firmAt = t;
@@ -1302,7 +1332,8 @@ function pruneTrackers(t) {
   for (let i = trackers.length - 1; i >= 0; i--) {
     const h = trackers[i];
     if (t - h.seen > 0.3) {
-      if (h.pinch) endStroke('hand' + h.id, { hand: true, cutAt: h.firmAt ?? h.seen });
+      if (h.grab) { seekTo(dragPos); dragPos = null; }
+      else if (h.pinch) endStroke('hand' + h.id, { hand: true, cutAt: h.firmAt ?? h.seen });
       trackers.splice(i, 1);
       updateStatus();
     }
@@ -1351,6 +1382,7 @@ function updateStatus() {
   if (!landmarker) return;
   const n = trackers.length;
   if (!n) setStatus('Montre ta main à la caméra', 'warn');
+  else if (trackers.some(h => h.grab)) setStatus('Tu déplaces la barre', 'ok');
   else if (trackers.some(h => h.pinch)) setStatus('Tu dessines', 'ok');
   else setStatus(n > 1 ? '2 mains détectées' : 'Main détectée', 'ok');
 }
@@ -1364,16 +1396,26 @@ function toast(msg) {
 }
 
 /* ---------------- souris ---------------- */
+const nearPlayhead = (x, y) => Math.abs(x - playheadPos() * W) < 14 || (Math.abs(x - playheadPos() * W) < 20 && Math.abs(y - handleY()) < 22);
+let ptrDrag = false;
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   initAudio();
   closePanels();
   canvas.setPointerCapture(e.pointerId);
+  if (nearPlayhead(e.clientX, e.clientY)) { ptrDrag = true; dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
   startStroke('ptr', e.clientX / W, e.clientY / H);
   updateHint();
 });
-canvas.addEventListener('pointermove', (e) => { if (active.has('ptr')) addPoint('ptr', e.clientX / W, e.clientY / H); });
-const endPtr = () => { if (active.has('ptr')) endStroke('ptr'); };
+canvas.addEventListener('pointermove', (e) => {
+  if (ptrDrag) { dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
+  if (active.has('ptr')) { addPoint('ptr', e.clientX / W, e.clientY / H); return; }
+  canvas.style.cursor = nearPlayhead(e.clientX, e.clientY) ? 'ew-resize' : 'crosshair';
+});
+const endPtr = () => {
+  if (ptrDrag) { ptrDrag = false; seekTo(dragPos); dragPos = null; return; }
+  if (active.has('ptr')) endStroke('ptr');
+};
 canvas.addEventListener('pointerup', endPtr);
 canvas.addEventListener('pointercancel', endPtr);
 
@@ -1586,6 +1628,7 @@ function initUI() {
     else if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); clearAll(); }
     else if (k === 'r') toggleRec();
     else if (k === 'm') togglePanel('#drawer');
+    else if (e.key === 'Home') { seekTo(0); }
     else if (e.key === 'Escape') { closePanels(); $('#recModal').hidden = true; }
   });
 
