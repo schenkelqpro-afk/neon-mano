@@ -227,6 +227,20 @@ button { cursor: pointer; }
   box-shadow: 0 0 18px rgba(255,176,46,0.25); cursor: pointer;
 }
 #pausePill[hidden] { display: none; }
+body.metro-on #pausePill, body.metro-on #editPill { bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 116px); }
+body.editing #pausePill { bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 122px); }
+body.editing.metro-on #pausePill { bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 164px); }
+#editPill {
+  position: fixed; z-index: 6; left: 16px; right: 16px; margin-inline: auto; width: fit-content; max-width: calc(100vw - 32px);
+  bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 74px);
+  display: flex; align-items: center; gap: 12px; padding: 6px 6px 6px 15px; border-radius: 999px; font-size: 12.5px; color: var(--muted);
+  border: 1px solid rgba(255,255,255,0.28);
+}
+#editPill[hidden] { display: none; }
+#editPill b { color: var(--ink); font-size: 13px; white-space: nowrap; }
+#editPill kbd { font: 500 11px/1 var(--font-mono); padding: 2px 5px; border-radius: 5px; border: 1px solid var(--faint); color: var(--ink); }
+#editDone { height: 30px; padding: 0 14px; border-radius: 999px; border: 0; background: #fff; color: #0b0d08; font-weight: 700; font-size: 12px; }
+@media (max-width: 900px) { #editPill .long { display: none; } }
 #pausePill kbd { font: 500 11px/1 var(--font-mono); padding: 3px 6px; border-radius: 6px; border: 1px solid rgba(255,210,122,0.5); }
 #btnTrack[aria-pressed="true"] { background: rgba(255,176,46,0.18); color: #ffb02e; }
 #hint {
@@ -376,6 +390,12 @@ button { cursor: pointer; }
 </div>
 
 <button id="pausePill" class="glass" hidden title="Reprendre le suivi de la main (H)">✋ Suivi de la main en pause <kbd>H</kbd> pour reprendre</button>
+
+<div id="editPill" class="glass" hidden>
+  <b>Édition des points</b>
+  <span>Glisse un point (calé sur la note et le temps, <kbd>Alt</kbd> = libre)<span class="long"> · double-clic sur le trait : ajouter · clic droit ou <kbd>Suppr</kbd> : retirer · flèches : un pas</span></span>
+  <button id="editDone" title="Terminer l'édition (Échap)">Terminer</button>
+</div>
 
 <div id="hint" class="glass">Pince le pouce et l'index pour dessiner. La barre lumineuse joue tes traits.</div>
 
@@ -975,6 +995,7 @@ function markDirty() {
 function undo() {
   if (!history.length) { toast('Rien à annuler'); return; }
   state.strokes = history.pop();
+  if (editing) { const st = state.strokes[editing.idx]; if (st) { editing.st = st; editing.pi = Math.min(editing.pi, ctrlOf(st).length - 1); } else stopEdit(); }
   stringsChanged();
 }
 function clearAll() {
@@ -1435,6 +1456,8 @@ function frame(nowMs) {
   ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
   for (const s of active.values()) drawTube(ctx, s.pts, instColor(s.inst));
   drawSelection();
+  drawBeatStrip();
+  drawEditing();
   drawPlayhead(playheadPos(), t);
   drawSparks(dt);
   drawHands();
@@ -1608,6 +1631,7 @@ function setStatus(text, cls) {
   const el = $('#status'); el.classList.toggle('ok', cls === 'ok'); el.classList.toggle('warn', cls === 'warn');
 }
 function updateStatus() {
+  if (editing) return setStatus('Édition des points', 'ok');
   if (mode === 'mouse') return setStatus(state.mode === 'move' ? 'Mode Déplacer : attrape une forme' : 'Souris : clique et glisse', 'ok');
   if (!landmarker) return;
   if (state.trackPaused) return setStatus('Suivi en pause (H)', 'warn');
@@ -1620,7 +1644,7 @@ function updateStatus() {
   else setStatus(n > 1 ? '2 mains détectées' : 'Main détectée', 'ok');
 }
 function updateHint() {
-  $('#hint').hidden = !!(state.strokes.length || template || active.size || state.trackPaused);
+  $('#hint').hidden = !!(state.strokes.length || template || active.size || state.trackPaused || editing);
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -1632,6 +1656,7 @@ function toast(msg) {
 let selected = null;     // trait sélectionné (référence)
 let moving = null;       // { key, idx, base, sx, sy }
 function setMode(m) {
+  if (editing) stopEdit();
   state.mode = m;
   $('#btnMove').setAttribute('aria-pressed', String(m === 'move'));
   if (m !== 'move') selected = null;
@@ -1691,12 +1716,13 @@ function beginResize(key, corner) {
   const base = selected.pts, b = boundsOf(base);
   const copy = { ...selected, pts: base.map(p => p.slice()) };
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
+  const baseCtrl = selected.ctrl;
   selected = copy;
   const ax = corner === 0 || corner === 3 ? b.x1 : b.x0;   // coin opposé fixe
   const ay = corner === 0 || corner === 1 ? b.y1 : b.y0;
   const cx = corner === 0 || corner === 3 ? b.x0 : b.x1;
   const cy = corner === 0 || corner === 1 ? b.y0 : b.y1;
-  moving = { key, idx, base, resize: true, ax, ay, cx, cy };
+  moving = { key, idx, base, baseCtrl, resize: true, ax, ay, cx, cy };
   return true;
 }
 function scaleSelected(fx, fy) {
@@ -1704,6 +1730,7 @@ function scaleSelected(fx, fy) {
   if (idx < 0) { toast('Attrape d’abord une forme en mode Déplacer'); return; }
   const b = boundsOf(selected.pts);
   const copy = { ...selected, pts: scaledPts(selected.pts, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, fx, fy) };
+  if (selected.ctrl) copy.ctrl = scaledPts(selected.ctrl, (b.x0 + b.x1) / 2, (b.y0 + b.y1) / 2, fx, fy);
   const next = state.strokes.slice(); next[idx] = copy;
   selected = copy;
   commit(next);
@@ -1719,7 +1746,7 @@ function beginMove(key, x, y) {
   const copy = { ...state.strokes[idx], pts: base.map(p => p.slice()) };
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
   selected = copy;
-  moving = { key, idx, base, sx: x, sy: y };
+  moving = { key, idx, base, baseCtrl: state.strokes[idx].ctrl, sx: x, sy: y };
   layerDirty = true;
   return true;
 }
@@ -1731,10 +1758,12 @@ function updateMove(x, y) {
     const fx = Math.abs(w0) < 0.004 ? 1 : Math.max(0.08, (x - m.ax) / w0);
     const fy = Math.abs(h0) < 0.004 ? 1 : Math.max(0.08, (y - m.ay) / h0);
     state.strokes[m.idx].pts = scaledPts(m.base, m.ax, m.ay, fx, fy);
+    if (m.baseCtrl) state.strokes[m.idx].ctrl = scaledPts(m.baseCtrl, m.ax, m.ay, fx, fy);
     layerDirty = true; scoreDirty = true;
     return;
   }
   state.strokes[moving.idx].pts = shiftedPts(moving.base, x - moving.sx, y - moving.sy);
+  if (moving.baseCtrl) state.strokes[moving.idx].ctrl = shiftedPts(moving.baseCtrl, x - moving.sx, y - moving.sy);
   layerDirty = true; scoreDirty = true;
 }
 function endMove() {
@@ -1747,6 +1776,7 @@ function nudge(dxSteps, dyRows) {
   if (idx < 0) { toast('Attrape d’abord une forme en mode Déplacer'); return; }
   const rowH = (GB - GT) / (ROWS.length - 1);
   const copy = { ...selected, pts: shiftedPts(selected.pts, dxSteps / STEPS, -dyRows * rowH) };
+  if (selected.ctrl) copy.ctrl = shiftedPts(selected.ctrl, dxSteps / STEPS, -dyRows * rowH);
   const next = state.strokes.slice(); next[idx] = copy;
   selected = copy;
   commit(next);
@@ -1768,15 +1798,250 @@ function drawSelection() {
   ctx.restore();
 }
 
+/* ---------------- édition précise par points ---------------- */
+// Un trait édité garde ses points de contrôle (st.ctrl) ; st.pts est la courbe lisse qui passe par eux.
+let editing = null;      // { st, idx, pi (point choisi), drag: { off } | null, hover }
+const EDIT_SEG = 14;
+// Courbe lisse qui passe par chaque point sans jamais dépasser leur hauteur ni revenir en arrière
+// (Hermite monotone) : un point posé sur une note donne exactement cette note.
+function curveFrom(ctrl) {
+  const n = ctrl.length;
+  if (n < 2) return ctrl.map(p => p.slice());
+  const m = ctrl.map((p, i) => [0, 1].map(k => {
+    if (i === 0) return ctrl[1][k] - ctrl[0][k];
+    if (i === n - 1) return ctrl[n - 1][k] - ctrl[n - 2][k];
+    const a = p[k] - ctrl[i - 1][k], b = ctrl[i + 1][k] - p[k];
+    if (a * b <= 0) return 0;
+    return Math.sign(a) * Math.min(Math.abs(a + b) / 2, 3 * Math.min(Math.abs(a), Math.abs(b)));
+  }));
+  const out = [];
+  for (let i = 0; i < n - 1; i++) {
+    const p1 = ctrl[i], p2 = ctrl[i + 1];
+    for (let j = 0; j < EDIT_SEG; j++) {
+      const t = j / EDIT_SEG, t2 = t * t, t3 = t2 * t;
+      const h00 = 2 * t3 - 3 * t2 + 1, h10 = t3 - 2 * t2 + t, h01 = -2 * t3 + 3 * t2, h11 = t3 - t2;
+      out.push([0, 1].map(k => clamp(h00 * p1[k] + h10 * m[i][k] + h01 * p2[k] + h11 * m[i + 1][k], Math.min(p1[k], p2[k]), Math.max(p1[k], p2[k]))));
+    }
+  }
+  out.push(ctrl[n - 1].slice());
+  return out;
+}
+// Points de contrôle d'un trait : ceux déjà posés, sinon une simplification (6 à 14 points)
+function ctrlOf(st) {
+  if (st.ctrl && st.ctrl.length) return st.ctrl;
+  if (st.pts.length <= 2) return st.pts.map(p => p.slice());
+  let eps = 0.0025, c = simplify(st.pts, eps);
+  while (c.length > 14) { eps *= 1.35; c = simplify(st.pts, eps); }
+  return c.map(p => p.slice());
+}
+const snapX = (x) => clamp(Math.round(x * STEPS) / STEPS, 0, 0.999);
+const snapY = (y) => rowToY(yToRow(y));
+function noteLabel(y) {
+  const r = yToRow(y);
+  return (editing ? editing.st.inst : state.sound) === 'drums' ? drumZone(r)[2] : midiName(ROWS[r]);
+}
+function beatLabel(x) {
+  const st = clamp(Math.round(x * STEPS), 0, STEPS - 1);
+  const bar = Math.floor(st / 16) + 1, beat = Math.floor((st % 16) / 4) + 1, sub = st % 4;
+  return `mesure ${bar}, temps ${beat}` + (sub ? ` +${sub}/4` : '');
+}
+function startEdit(idx) {
+  const st = state.strokes[idx];
+  if (!st) return;
+  if (state.mode === 'move') { state.mode = 'draw'; $('#btnMove').setAttribute('aria-pressed', 'false'); selected = null; }
+  editing = { st, idx, pi: -1, drag: null, hover: -1 };
+  document.body.classList.add('editing');
+  $('#editPill').hidden = false;
+  canvas.style.cursor = 'default';
+  updateHint(); updateStatus();
+}
+function stopEdit() {
+  if (!editing) return;
+  editing = null;
+  document.body.classList.remove('editing');
+  $('#editPill').hidden = true;
+  canvas.style.cursor = state.mode === 'move' ? 'grab' : 'crosshair';
+  updateHint(); updateStatus();
+}
+// Copie modifiable du trait édité (un pas d'annulation par geste)
+function editableCopy() {
+  const idx = state.strokes.indexOf(editing.st);
+  if (idx < 0) { stopEdit(); return null; }
+  history.push(state.strokes);
+  if (history.length > 120) history.shift();
+  const copy = { ...editing.st, ctrl: ctrlOf(editing.st).map(p => p.slice()) };
+  state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
+  editing.st = copy; editing.idx = idx;
+  return copy;
+}
+function applyCtrl(st) {
+  st.pts = curveFrom(st.ctrl);
+  layerDirty = true; scoreDirty = true;
+}
+function hitPoint(px, py, radius = 13) {
+  if (!editing) return -1;
+  const c = ctrlOf(editing.st);
+  let best = -1, bd = radius;
+  c.forEach(([x, y], i) => { const d = Math.hypot(x * W - px, y * H - py); if (d <= bd) { bd = d; best = i; } });
+  return best;
+}
+function placePoint(x, y, free) {
+  return free ? [clamp(x, 0, 0.999), clamp(y, 0.02, 0.98)] : [snapX(x), snapY(clamp(y, 0.02, 0.98))];
+}
+function editPointerDown(e, dbl) {
+  const px = e.clientX, py = e.clientY;
+  const pi = hitPoint(px, py);
+  if (pi >= 0) {
+    const c = ctrlOf(editing.st);
+    editing.pi = pi;
+    editing.drag = { pi, offX: c[pi][0] - px / W, offY: c[pi][1] - py / H, started: false };
+    canvas.style.cursor = 'grabbing';
+    return;
+  }
+  const onCurve = distToStroke(editing.st, px, py) <= 16;
+  if (onCurve && dbl) { insertPoint(px, py); return; }
+  if (onCurve) return;
+  // clic à côté : on termine ; sur un autre trait, un double-clic l'ouvrira
+  stopEdit();
+}
+function editPointerMove(e) {
+  const d = editing.drag;
+  if (!d) {
+    const hp = hitPoint(e.clientX, e.clientY);
+    editing.hover = hp;
+    canvas.style.cursor = hp >= 0 ? 'grab' : distToStroke(editing.st, e.clientX, e.clientY) <= 16 ? 'copy' : 'default';
+    return;
+  }
+  if (!d.started) { if (!editableCopy()) return; d.started = true; }
+  const st = editing.st;
+  st.ctrl[d.pi] = placePoint(e.clientX / W + d.offX, e.clientY / H + d.offY, e.altKey);
+  applyCtrl(st);
+}
+function editPointerUp() {
+  const d = editing && editing.drag;
+  if (!d) return;
+  editing.drag = null;
+  canvas.style.cursor = 'grab';
+  if (d.started) stringsChanged();
+}
+function insertPoint(px, py) {
+  const c = ctrlOf(editing.st);
+  if (c.length < 2) return;
+  // segment le plus proche sur la courbe telle qu'elle sera redessinée
+  const curve = curveFrom(c);
+  let bk = 0, bd = Infinity;
+  curve.forEach(([x, y], k) => { const dd = Math.hypot(x * W - px, y * H - py); if (dd < bd) { bd = dd; bk = k; } });
+  const seg = clamp(Math.floor(bk / EDIT_SEG), 0, c.length - 2);
+  const st = editableCopy(); if (!st) return;
+  st.ctrl.splice(seg + 1, 0, curve[bk].slice());
+  editing.pi = seg + 1;
+  applyCtrl(st); stringsChanged();
+}
+function removePoint(pi) {
+  const c = ctrlOf(editing.st);
+  if (pi < 0 || pi >= c.length) return;
+  if (c.length <= 2) { toast('Un trait garde au moins 2 points. Suppr hors édition pour l’effacer.'); return; }
+  const st = editableCopy(); if (!st) return;
+  st.ctrl.splice(pi, 1);
+  editing.pi = Math.min(pi, st.ctrl.length - 1);
+  applyCtrl(st); stringsChanged();
+}
+function nudgePoint(dxSteps, dyRows) {
+  if (!editing || editing.pi < 0) { toast('Clique d’abord sur un point'); return; }
+  const st = editableCopy(); if (!st) return;
+  const [x, y] = st.ctrl[editing.pi];
+  st.ctrl[editing.pi] = [clamp(snapX(x) + dxSteps / STEPS, 0, 0.999), rowToY(clamp(yToRow(y) + dyRows, 0, ROWS.length - 1))];
+  applyCtrl(st); stringsChanged();
+}
+function drawEditing() {
+  if (!editing) return;
+  if (!state.strokes.includes(editing.st)) { stopEdit(); return; }
+  const st = editing.st, c = ctrlOf(st), col = hexRgb(instColor(st.inst));
+  ctx.save();
+  // fil blanc le long du trait et liaisons pointillées entre les points
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  tracePath(ctx, st.pts); ctx.strokeStyle = 'rgba(255,255,255,0.55)'; ctx.lineWidth = 1.5; ctx.stroke();
+  if (c.length > 1) {
+    ctx.setLineDash([3, 5]); ctx.beginPath();
+    c.forEach(([x, y], i) => i ? ctx.lineTo(x * W, y * H) : ctx.moveTo(x * W, y * H));
+    ctx.strokeStyle = 'rgba(255,255,255,0.28)'; ctx.lineWidth = 1; ctx.stroke(); ctx.setLineDash([]);
+  }
+  c.forEach(([x, y], i) => {
+    const on = i === editing.pi, hov = i === editing.hover || (editing.drag && editing.drag.pi === i);
+    const r = on || hov ? 8 : 6;
+    ctx.beginPath(); ctx.arc(x * W, y * H, r + 3, 0, Math.PI * 2); ctx.fillStyle = 'rgba(0,0,0,0.55)'; ctx.fill();
+    ctx.beginPath(); ctx.arc(x * W, y * H, r, 0, Math.PI * 2);
+    ctx.fillStyle = on ? rgba(col, 1) : '#fff'; ctx.fill();
+    ctx.lineWidth = 2; ctx.strokeStyle = on ? '#fff' : rgba(col, 1); ctx.stroke();
+  });
+  // étiquette du point en cours : note et position dans la mesure
+  const li = editing.drag ? editing.drag.pi : editing.hover >= 0 ? editing.hover : editing.pi;
+  if (li >= 0 && c[li]) {
+    const [x, y] = c[li], txt = `${noteLabel(y)} · ${beatLabel(x)}`;
+    ctx.font = '600 12px "JetBrains Mono", ui-monospace, monospace';
+    const w = ctx.measureText(txt).width + 16;
+    const lx = clamp(x * W - w / 2, 6, W - w - 6), ly = y * H - 38 < 8 ? y * H + 18 : y * H - 38;
+    ctx.fillStyle = 'rgba(10,12,16,0.88)'; ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.roundRect(lx, ly, w, 24, 8); ctx.fill(); ctx.stroke();
+    ctx.fillStyle = '#fff'; ctx.textBaseline = 'middle'; ctx.fillText(txt, lx + 8, ly + 12);
+  }
+  ctx.restore();
+}
+
+/* ---------------- bande de rythme du métronome ---------------- */
+function drawBeatStrip() {
+  if (!state.metro) return;
+  const c = hexRgb(state.head);
+  const y0 = Math.round(GB * H + 12), h = clamp(H - 78 - y0, 14, 30), y1 = y0 + h;
+  const pos = playheadPos(), cur = Math.floor(pos * 8);   // 8 temps dans la boucle
+  const flash = ac ? clamp(1 - (ac.currentTime - lastBeat.time) / 0.25, 0, 1) : 0;
+  ctx.save();
+  // repères verticaux des temps à travers la grille
+  for (let b = 0; b <= 8; b++) {
+    const x = Math.round(b / 8 * W) + 0.5;
+    ctx.strokeStyle = b % 4 === 0 ? rgba(c, 0.32) : rgba(c, 0.16);
+    ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(x, GT * H - 10); ctx.lineTo(x, y1); ctx.stroke();
+  }
+  // cases des temps, celle qui sonne s'allume
+  for (let b = 0; b < 8; b++) {
+    const x = b / 8 * W, w = W / 8, act = b === cur && state.playing;
+    ctx.fillStyle = act ? rgba(c, 0.18 + 0.4 * flash) : b % 4 === 0 ? 'rgba(255,255,255,0.07)' : 'rgba(255,255,255,0.035)';
+    ctx.fillRect(x + 2, y0, w - 4, h);
+    // doubles-croches
+    for (let k = 1; k < 4; k++) {
+      const sx = Math.round(x + k * w / 4) + 0.5;
+      ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.beginPath(); ctx.moveTo(sx, y1 - h * 0.35); ctx.lineTo(sx, y1); ctx.stroke();
+    }
+    ctx.font = `${b % 4 === 0 ? 700 : 500} ${clamp(h * 0.5, 10, 13)}px "JetBrains Mono", ui-monospace, monospace`;
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = act ? '#fff' : b % 4 === 0 ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.5)';
+    ctx.fillText(String(b % 4 + 1), x + 9, y0 + h / 2);
+  }
+  ctx.restore();
+}
+
 /* ---------------- souris ---------------- */
 const nearPlayhead = (x, y) => Math.abs(x - playheadPos() * W) < 14 || (Math.abs(x - playheadPos() * W) < 20 && Math.abs(y - handleY()) < 22);
-let ptrDrag = false;
+let ptrDrag = false, lastTap = null, lastDown = null;
 canvas.addEventListener('pointerdown', (e) => {
   if (e.button !== 0) return;
   initAudio();
   closePanels();
   canvas.setPointerCapture(e.pointerId);
+  // double-clic maison (detail vaut 0 sur les pointer events de Chrome)
+  const tNow = performance.now(), dbl = !!(lastDown && tNow - lastDown.t < 450 && Math.hypot(e.clientX - lastDown.x, e.clientY - lastDown.y) < 10);
+  lastDown = dbl ? null : { t: tNow, x: e.clientX, y: e.clientY };
   if (nearPlayhead(e.clientX, e.clientY)) { ptrDrag = true; dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
+  if (editing) { editPointerDown(e, dbl); return; }
+  // double-clic sur un trait : édition par points (on retire le « tap » posé par le premier clic)
+  if (dbl) {
+    if (lastTap && performance.now() - lastTap.t < 700 && state.strokes[state.strokes.length - 1] === lastTap.st && history.length) {
+      state.strokes = history.pop(); stringsChanged();
+    }
+    lastTap = null;
+    const idx = hitStroke(e.clientX / W, e.clientY / H, 18);
+    if (idx >= 0) { startEdit(idx); return; }
+  }
   if (state.mode === 'move') { if (beginMove('ptr', e.clientX / W, e.clientY / H) && !moving.resize) canvas.style.cursor = 'grabbing'; return; }
   startStroke('ptr', e.clientX / W, e.clientY / H);
   updateHint();
@@ -1785,6 +2050,7 @@ canvas.addEventListener('pointermove', (e) => {
   if (ptrDrag) { dragPos = clamp(e.clientX / W, 0, 0.9999); return; }
   if (moving && moving.key === 'ptr') { updateMove(e.clientX / W, e.clientY / H); return; }
   if (active.has('ptr')) { addPoint('ptr', e.clientX / W, e.clientY / H); return; }
+  if (editing) { editPointerMove(e); return; }
   canvas.style.cursor = nearPlayhead(e.clientX, e.clientY) ? 'ew-resize'
     : state.mode === 'move' ? (() => {
         const hc = hitHandle(e.clientX / W, e.clientY / H);
@@ -1795,8 +2061,19 @@ canvas.addEventListener('pointermove', (e) => {
 const endPtr = () => {
   if (ptrDrag) { ptrDrag = false; seekTo(dragPos); dragPos = null; return; }
   if (moving && moving.key === 'ptr') { endMove(); canvas.style.cursor = 'grab'; return; }
-  if (active.has('ptr')) endStroke('ptr');
+  if (editing) { editPointerUp(); return; }
+  if (active.has('ptr')) {
+    const n = state.strokes.length; endStroke('ptr');
+    const last = state.strokes[state.strokes.length - 1];
+    lastTap = state.strokes.length > n && last.pts.length === 1 ? { t: performance.now(), st: last } : null;
+  }
 };
+canvas.addEventListener('contextmenu', (e) => {
+  if (!editing) return;
+  e.preventDefault();
+  const pi = hitPoint(e.clientX, e.clientY);
+  if (pi >= 0) removePoint(pi);
+});
 canvas.addEventListener('pointerup', endPtr);
 canvas.addEventListener('pointercancel', endPtr);
 
@@ -1900,7 +2177,10 @@ function fmtDate(ms) {
 }
 function snapshot() {
   return {
-    strokes: state.strokes.map(st => ({ pts: st.pts.map(p => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4]), inst: st.inst })),
+    strokes: state.strokes.map(st => {
+      const r4 = (p) => [Math.round(p[0] * 1e4) / 1e4, Math.round(p[1] * 1e4) / 1e4];
+      return st.ctrl ? { pts: st.pts.map(r4), ctrl: st.ctrl.map(r4), inst: st.inst } : { pts: st.pts.map(r4), inst: st.inst };
+    }),
     instColors: { ...state.instColors },
     sound: state.sound, scale: state.scale, key: state.key, bpm: state.bpm, drums: state.drums, neon: state.neon, head: state.head,
   };
@@ -1942,7 +2222,11 @@ function openCreation(id) {
   if (it.head) setColor('head', it.head);
   setBrush(legacy);
   buildSwatches($('#swHead'), HEADS, 'head');
-  commit(it.strokes.map(st => ({ pts: st.pts.map(p => p.slice()), inst: SOUNDS[st.inst] ? st.inst : legacy })));
+  commit(it.strokes.map(st => {
+    const o = { pts: st.pts.map(p => p.slice()), inst: SOUNDS[st.inst] ? st.inst : legacy };
+    if (Array.isArray(st.ctrl) && st.ctrl.length) o.ctrl = st.ctrl.map(p => p.slice());
+    return o;
+  }));
   state.libId = it.id; state.unsaved = false; save();
   renderLib(); closePanels();
   if (!state.playing) setPlaying(true);
@@ -2180,9 +2464,12 @@ function initUI() {
   $('#btnMetro').addEventListener('click', () => {
     initAudio(); state.metro = !state.metro;
     $('#btnMetro').setAttribute('aria-pressed', String(state.metro)); $('#metroRail').hidden = !state.metro;
+    document.body.classList.toggle('metro-on', state.metro);
     save(); if (state.metro && !state.playing) setPlaying(true);
   });
   $('#metroRail').hidden = !state.metro;
+  document.body.classList.toggle('metro-on', state.metro);
+  $('#editDone').addEventListener('click', stopEdit);
   $('#btnMetro').setAttribute('aria-pressed', String(state.metro));
   // Volume du métronome : même valeur dans Réglages et sur le rail de droite
   const mv = $('#metroVol'), mvo = $('#metroVolVal'), track = $('#metroTrack');
@@ -2245,6 +2532,15 @@ function initUI() {
     if (!$('#intro').hidden) return;
     const k = e.key.toLowerCase();
     if ((e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); saveCreation(false); return; }
+    if (editing) {
+      if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); stopEdit(); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (editing.pi >= 0) removePoint(editing.pi); else toast('Clique d’abord sur un point'); return; }
+      if (e.key.startsWith('Arrow')) {
+        e.preventDefault();
+        const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
+        nudgePoint(d[0], d[1]); return;
+      }
+    }
     if (e.code === 'Space') { e.preventDefault(); initAudio(); setPlaying(!state.playing); }
     else if (k === 'z' || ((e.metaKey || e.ctrlKey) && k === 'z')) { e.preventDefault(); undo(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && state.mode === 'move' && selected && state.strokes.includes(selected)) {
@@ -2308,7 +2604,7 @@ initUI();
 setPlaying(true);
 updateHint();
 requestAnimationFrame(frame);
-window.__neon = { onHands, pruneTrackers, setTrackPaused, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
+window.__neon = { onHands, pruneTrackers, setTrackPaused, startEdit, stopEdit, curveFrom, get editing() { return editing; }, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
 </script>
 </body>
 </html>

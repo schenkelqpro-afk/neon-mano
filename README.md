@@ -23,6 +23,10 @@ Instruments et couleurs : chaque trait garde l'instrument choisi au moment où i
 
 Métronome : bouton (T), un clic sur chaque temps, accentué en début de mesure, volume réglable sur un curseur vertical tout à droite de l'écran (visible quand le métronome est actif) ou dans Réglages. Il n'apparaît ni dans les vidéos ni dans le WAV.
 
+Édition précise : double-clic sur un trait pour faire apparaître ses points. Glisse un point, il se cale sur la note et le temps les plus proches (Alt pour le placer librement). Double-clic sur le trait pour ajouter un point, clic droit ou Suppr pour en retirer un, flèches pour le décaler d'un pas ou d'une note, Échap ou Terminer pour finir. La musique continue pendant l'édition.
+
+Bande de rythme : quand le métronome est actif, les 8 temps de la boucle (1 2 3 4, 1 2 3 4) s'affichent en bas de l'écran, avec un repère vertical par temps dans la grille, et le temps en cours s'allume.
+
 Pause du suivi : bouton main (H). Plus rien ne s'écrit pendant que tu réfléchis, la musique continue. En reprenant, une main déjà pincée doit d'abord s'ouvrir avant de dessiner.
 
 Raccourcis : Espace lecture/pause, H pause du suivi, T métronome, V déplacer, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles, B bibliothèque, Ctrl/Cmd+S enregistrer la création.
