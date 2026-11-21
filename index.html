@@ -240,6 +240,9 @@ body.editing.metro-on #pausePill { bottom: calc(max(14px, env(safe-area-inset-bo
 #editPill b { color: var(--ink); font-size: 13px; white-space: nowrap; }
 #editPill kbd { font: 500 11px/1 var(--font-mono); padding: 2px 5px; border-radius: 5px; border: 1px solid var(--faint); color: var(--ink); }
 #editDone { height: 30px; padding: 0 14px; border-radius: 999px; border: 0; background: #fff; color: #0b0d08; font-weight: 700; font-size: 12px; }
+#editHide { width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--faint); background: transparent; color: var(--ink); font-size: 18px; line-height: 1; }
+#editHide:hover { border-color: rgba(255,255,255,0.4); }
+body.editing #status { cursor: pointer; }
 @media (max-width: 900px) { #editPill .long { display: none; } }
 #pausePill kbd { font: 500 11px/1 var(--font-mono); padding: 3px 6px; border-radius: 6px; border: 1px solid rgba(255,210,122,0.5); }
 #btnTrack[aria-pressed="true"] { background: rgba(255,176,46,0.18); color: #ffb02e; }
@@ -395,6 +398,7 @@ body.editing.metro-on #pausePill { bottom: calc(max(14px, env(safe-area-inset-bo
   <b>Édition des points</b>
   <span>Glisse un point (calé sur la note et le temps, <kbd>Alt</kbd> = libre)<span class="long"> · double-clic sur le trait : ajouter · clic droit ou <kbd>Suppr</kbd> : retirer · flèches : un pas</span></span>
   <button id="editDone" title="Terminer l'édition (Échap)">Terminer</button>
+  <button id="editHide" title="Masquer ce bandeau (l'édition continue)" aria-label="Masquer le bandeau">×</button>
 </div>
 
 <div id="hint" class="glass">Pince le pouce et l'index pour dessiner. La barre lumineuse joue tes traits.</div>
@@ -1631,7 +1635,7 @@ function setStatus(text, cls) {
   const el = $('#status'); el.classList.toggle('ok', cls === 'ok'); el.classList.toggle('warn', cls === 'warn');
 }
 function updateStatus() {
-  if (editing) return setStatus('Édition des points', 'ok');
+  if (editing) return setStatus(editHelpHidden() ? 'Édition des points · Échap pour finir' : 'Édition des points', 'ok');
   if (mode === 'mouse') return setStatus(state.mode === 'move' ? 'Mode Déplacer : attrape une forme' : 'Souris : clique et glisse', 'ok');
   if (!landmarker) return;
   if (state.trackPaused) return setStatus('Suivi en pause (H)', 'warn');
@@ -1851,9 +1855,16 @@ function startEdit(idx) {
   if (state.mode === 'move') { state.mode = 'draw'; $('#btnMove').setAttribute('aria-pressed', 'false'); selected = null; }
   editing = { st, idx, pi: -1, drag: null, hover: -1 };
   document.body.classList.add('editing');
-  $('#editPill').hidden = false;
+  $('#editPill').hidden = editHelpHidden();
   canvas.style.cursor = 'default';
   updateHint(); updateStatus();
+}
+// Bandeau d'aide masquable : le choix est retenu sur cet appareil, l'édition continue
+function editHelpHidden() { try { return localStorage.getItem('neonmano.editHelp') === 'off'; } catch (e) { return false; } }
+function setEditHelp(show) {
+  try { localStorage.setItem('neonmano.editHelp', show ? 'on' : 'off'); } catch (e) { /* ignoré */ }
+  if (editing) $('#editPill').hidden = !show;
+  if (!show) toast('Bandeau masqué. Échap ou un clic à côté pour terminer. Clique sur « Édition des points » en haut pour le revoir.');
 }
 function stopEdit() {
   if (!editing) return;
@@ -2470,6 +2481,8 @@ function initUI() {
   $('#metroRail').hidden = !state.metro;
   document.body.classList.toggle('metro-on', state.metro);
   $('#editDone').addEventListener('click', stopEdit);
+  $('#editHide').addEventListener('click', () => { setEditHelp(false); updateStatus(); });
+  $('#status').addEventListener('click', () => { if (editing && $('#editPill').hidden) { setEditHelp(true); updateStatus(); } });
   $('#btnMetro').setAttribute('aria-pressed', String(state.metro));
   // Volume du métronome : même valeur dans Réglages et sur le rail de droite
   const mv = $('#metroVol'), mvo = $('#metroVolVal'), track = $('#metroTrack');
