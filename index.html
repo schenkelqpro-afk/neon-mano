@@ -203,6 +203,32 @@ button { cursor: pointer; }
 .mini:hover { border-color: rgba(255,255,255,0.35); }
 .mini[aria-pressed="true"] { background: var(--neon); color: #0b0d08; border-color: var(--neon); }
 
+/* volume du métronome : rail vertical collé au bord droit, visible quand le métronome est actif */
+#metroRail {
+  position: fixed; z-index: 5; right: max(10px, env(safe-area-inset-right, 0px)); top: 50%; transform: translateY(-50%);
+  width: 52px; padding: 12px 0 10px; border-radius: 16px; display: grid; justify-items: center; gap: 8px;
+  touch-action: none;
+}
+#metroRail .rl { font: 500 9px/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+#metroTrack { position: relative; width: 26px; height: min(42vh, 340px); cursor: ns-resize; border-radius: 13px; }
+#metroTrack::before { content: ""; position: absolute; left: 11px; top: 0; bottom: 0; width: 4px; border-radius: 2px; background: rgba(255,255,255,0.14); }
+#metroFill { position: absolute; left: 11px; bottom: 0; width: 4px; border-radius: 2px; background: var(--neon); box-shadow: 0 0 8px var(--neon); }
+#metroKnob {
+  position: absolute; left: 3px; width: 20px; height: 20px; margin-bottom: -10px; border-radius: 50%;
+  background: #fff; box-shadow: 0 0 0 3px color-mix(in srgb, var(--neon) 70%, transparent), 0 2px 6px rgba(0,0,0,0.5);
+}
+#metroTrack:focus-visible { outline: 2px solid var(--neon); outline-offset: 4px; }
+#metroRailVal { font: 700 12px/1 var(--font-mono); font-variant-numeric: tabular-nums; }
+#pausePill {
+  position: fixed; z-index: 6; left: 16px; right: 16px; margin-inline: auto; width: fit-content;
+  bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 74px);
+  display: flex; align-items: center; gap: 9px; padding: 8px 15px; border-radius: 999px;
+  font-weight: 700; font-size: 13px; color: #ffd27a; border: 1px solid rgba(255,176,46,0.55);
+  box-shadow: 0 0 18px rgba(255,176,46,0.25); cursor: pointer;
+}
+#pausePill[hidden] { display: none; }
+#pausePill kbd { font: 500 11px/1 var(--font-mono); padding: 3px 6px; border-radius: 6px; border: 1px solid rgba(255,210,122,0.5); }
+#btnTrack[aria-pressed="true"] { background: rgba(255,176,46,0.18); color: #ffb02e; }
 #hint {
   position: fixed; z-index: 4; left: 16px; right: 16px; margin-inline: auto; width: fit-content; text-align: center;
   bottom: calc(max(14px, env(safe-area-inset-bottom, 0px)) + 74px);
@@ -341,6 +367,16 @@ button { cursor: pointer; }
   </div>
 </aside>
 
+<div id="metroRail" class="glass" hidden>
+  <span class="rl">Métro</span>
+  <div id="metroTrack" role="slider" tabindex="0" aria-label="Volume du métronome" aria-valuemin="0" aria-valuemax="100" aria-orientation="vertical">
+    <div id="metroFill"></div><div id="metroKnob"></div>
+  </div>
+  <span id="metroRailVal"></span>
+</div>
+
+<button id="pausePill" class="glass" hidden title="Reprendre le suivi de la main (H)">✋ Suivi de la main en pause <kbd>H</kbd> pour reprendre</button>
+
 <div id="hint" class="glass">Pince le pouce et l'index pour dessiner. La barre lumineuse joue tes traits.</div>
 
 <!-- Barre de contrôle -->
@@ -362,7 +398,10 @@ button { cursor: pointer; }
   </div>
   <label class="field" for="selDrums"><span>Rythme auto</span><select id="selDrums"></select></label>
   <span class="sep"></span>
-  <button id="btnMetro" class="icon toggle" title="Métronome (T) : un clic sur chaque temps, absent des enregistrements. Volume dans Réglages." aria-label="Métronome" aria-pressed="false">
+  <button id="btnTrack" class="icon toggle" title="Mettre le suivi de la main en pause (H) : plus rien ne s'écrit, la musique continue." aria-label="Mettre le suivi de la main en pause" aria-pressed="false">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 13V5.5a1.5 1.5 0 0 1 3 0V11"/><path d="M11 10.5V4a1.5 1.5 0 0 1 3 0v6.5"/><path d="M14 10.5V5.5a1.5 1.5 0 0 1 3 0V14a7 7 0 0 1-7 7h-.5a6 6 0 0 1-4.6-2.2L3 15.5a1.6 1.6 0 0 1 2.5-2L8 16"/><path id="trackSlash" d="M3 3l18 18" hidden/></svg>
+  </button>
+  <button id="btnMetro" class="icon toggle" title="Métronome (T) : un clic sur chaque temps, absent des enregistrements. Volume sur le bord droit de l’écran." aria-label="Métronome" aria-pressed="false">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 3h6l4 18H5z"/><path d="M12 15l5-8"/><path d="M7 15h10"/></svg>
   </button>
   <button id="btnMove" class="icon toggle" title="Déplacer les formes (V). Flèches : un pas ou une note." aria-label="Déplacer les formes" aria-pressed="false">
@@ -510,7 +549,7 @@ function save() {
   clearTimeout(saveTimer);
   saveTimer = setTimeout(() => {
     try {
-      const { playing, ...rest } = state;
+      const { playing, trackPaused, ...rest } = state;
       localStorage.setItem(STORE_KEY, JSON.stringify(rest));
     } catch (e) { /* ignoré */ }
   }, 300);
@@ -1416,12 +1455,14 @@ class OneEuro {
     return this.x;
   }
 }
-let landmarker = null, lastVideoTime = -1, trackerSeq = 0;
+let landmarker = null, lastVideoTime = -1, trackerSeq = 0, resumedAt = -99;
 const trackers = [];
 function newTracker() {
   const p = SMOOTH[state.smooth];
   const f = () => new OneEuro(p.min, p.beta);
-  return { id: ++trackerSeq, fx: f(), fy: f(), ftx: f(), fty: f(), fix: f(), fiy: f(), pinch: false, cnt: 0, seen: 0, wrist: null, pt: null, tip: null };
+  return { id: ++trackerSeq, fx: f(), fy: f(), ftx: f(), fty: f(), fix: f(), fiy: f(), pinch: false, cnt: 0, seen: 0, wrist: null, pt: null, tip: null,
+    // juste après une reprise du suivi, une main déjà pincée doit d'abord s'ouvrir avant de dessiner
+    armed: performance.now() / 1000 - resumedAt > 1.2 };
 }
 function toScreen(p) {
   const r = coverRect();
@@ -1461,7 +1502,8 @@ function onHands(res, t) {
     h.pt = [h.fx.filter((th[0] + ix[0]) / 2, t), h.fy.filter((th[1] + ix[1]) / 2, t)];
 
     const key = 'hand' + h.id;
-    if (!h.pinch) {
+    if (!h.armed) { if (ratio > off || !isolated) h.armed = true; }
+    else if (!h.pinch) {
       if (ratio < on && isolated) {
         if (++h.cnt >= 3) {
           h.pinch = true; h.cnt = 0; h.firmAt = t;
@@ -1506,8 +1548,29 @@ function pruneTrackers(t) {
     }
   }
 }
+// Pause du suivi : on termine proprement ce que les mains faisaient, puis on ignore la caméra.
+function releaseHands() {
+  const t = performance.now() / 1000;
+  for (const h of trackers) {
+    if (h.grab) { seekTo(dragPos); dragPos = null; }
+    else if (h.moving) endMove();
+    else if (h.pinch) endStroke('hand' + h.id, { hand: true, cutAt: h.firmAt ?? t });
+  }
+  trackers.length = 0;
+}
+function setTrackPaused(on) {
+  state.trackPaused = !!on;
+  if (on) releaseHands(); else resumedAt = performance.now() / 1000;
+  document.body.classList.toggle('trackoff', state.trackPaused);
+  $('#btnTrack').setAttribute('aria-pressed', String(state.trackPaused));
+  $('#btnTrack').setAttribute('aria-label', state.trackPaused ? 'Reprendre le suivi de la main' : 'Mettre le suivi de la main en pause');
+  $('#trackSlash').toggleAttribute('hidden', !state.trackPaused);
+  $('#pausePill').hidden = !state.trackPaused;
+  updateHint(); updateStatus();
+  toast(state.trackPaused ? 'Suivi en pause : rien ne s\'écrit, la musique continue' : 'Suivi repris');
+}
 function detectTick() {
-  if (!landmarker || !camReady || video.readyState < 2 || window.__neonPause) return;
+  if (!landmarker || !camReady || video.readyState < 2 || window.__neonPause || state.trackPaused) return;
   if (video.currentTime === lastVideoTime) return;
   lastVideoTime = video.currentTime;
   const ms = performance.now();
@@ -1547,6 +1610,7 @@ function setStatus(text, cls) {
 function updateStatus() {
   if (mode === 'mouse') return setStatus(state.mode === 'move' ? 'Mode Déplacer : attrape une forme' : 'Souris : clique et glisse', 'ok');
   if (!landmarker) return;
+  if (state.trackPaused) return setStatus('Suivi en pause (H)', 'warn');
   const n = trackers.length;
   if (!n) setStatus('Montre ta main à la caméra', 'warn');
   else if (trackers.some(h => h.grab)) setStatus('Tu déplaces la barre', 'ok');
@@ -1556,7 +1620,7 @@ function updateStatus() {
   else setStatus(n > 1 ? '2 mains détectées' : 'Main détectée', 'ok');
 }
 function updateHint() {
-  $('#hint').hidden = !!(state.strokes.length || template || active.size);
+  $('#hint').hidden = !!(state.strokes.length || template || active.size || state.trackPaused);
 }
 let toastTimer = 0;
 function toast(msg) {
@@ -2111,16 +2175,39 @@ function initUI() {
   $('#bpmUp').addEventListener('click', () => bpm(4));
   $('#btnPlay').addEventListener('click', () => { initAudio(); setPlaying(!state.playing); });
   $('#btnUndo').addEventListener('click', undo);
-  $('#btnMetro').addEventListener('click', () => { initAudio(); state.metro = !state.metro; $('#btnMetro').setAttribute('aria-pressed', String(state.metro)); save(); if (state.metro && !state.playing) setPlaying(true); });
+  $('#btnTrack').addEventListener('click', () => setTrackPaused(!state.trackPaused));
+  $('#pausePill').addEventListener('click', () => setTrackPaused(false));
+  $('#btnMetro').addEventListener('click', () => {
+    initAudio(); state.metro = !state.metro;
+    $('#btnMetro').setAttribute('aria-pressed', String(state.metro)); $('#metroRail').hidden = !state.metro;
+    save(); if (state.metro && !state.playing) setPlaying(true);
+  });
+  $('#metroRail').hidden = !state.metro;
   $('#btnMetro').setAttribute('aria-pressed', String(state.metro));
-  const mv = $('#metroVol'), mvo = $('#metroVolVal');
-  mv.value = state.metroVol; mvo.textContent = state.metroVol + ' %';
+  // Volume du métronome : même valeur dans Réglages et sur le rail de droite
+  const mv = $('#metroVol'), mvo = $('#metroVolVal'), track = $('#metroTrack');
   let mvTimer = 0;
-  mv.addEventListener('input', () => {
-    state.metroVol = Number(mv.value); mvo.textContent = state.metroVol + ' %'; save();
+  const showVol = () => {
+    const v = state.metroVol;
+    mv.value = v; mvo.textContent = v + ' %'; $('#metroRailVal').textContent = v;
+    $('#metroFill').style.height = v + '%'; $('#metroKnob').style.bottom = v + '%';
+    track.setAttribute('aria-valuenow', String(v));
+  };
+  const setVol = (v) => {
+    state.metroVol = Math.round(clamp(v, 0, 100)); showVol(); save();
     if (metroOut) metroOut.gain.value = metroGain();
-    clearTimeout(mvTimer); // petit clic d'essai quand on relâche le curseur
+    clearTimeout(mvTimer); // petit clic d'essai quand on s'arrête
     mvTimer = setTimeout(() => { initAudio(); metroClick(ac.currentTime + 0.02, true); }, 120);
+  };
+  showVol();
+  mv.addEventListener('input', () => setVol(Number(mv.value)));
+  const fromPointer = (e) => { const r = track.getBoundingClientRect(); setVol((r.bottom - e.clientY) / r.height * 100); };
+  track.addEventListener('pointerdown', (e) => { track.setPointerCapture(e.pointerId); fromPointer(e); });
+  track.addEventListener('pointermove', (e) => { if (track.hasPointerCapture(e.pointerId)) fromPointer(e); });
+  track.addEventListener('wheel', (e) => { e.preventDefault(); setVol(state.metroVol - Math.sign(e.deltaY) * 5); }, { passive: false });
+  track.addEventListener('keydown', (e) => {
+    const d = { ArrowUp: 5, ArrowRight: 5, ArrowDown: -5, ArrowLeft: -5, PageUp: 20, PageDown: -20 }[e.key];
+    if (d) { e.preventDefault(); e.stopPropagation(); setVol(state.metroVol + d); }
   });
   $('#btnMove').addEventListener('click', () => setMode(state.mode === 'move' ? 'draw' : 'move'));
   $('#btnClear').addEventListener('click', clearAll);
@@ -2169,6 +2256,7 @@ function initUI() {
     else if (k === 'b') openLib();
     else if (e.key === 'Home') { seekTo(0); }
     else if (k === 't') $('#btnMetro').click();
+    else if (k === 'h') setTrackPaused(!state.trackPaused);
     else if (k === 'v') $('#btnMove').click();
     else if (state.mode === 'move' && e.key.startsWith('Arrow') && e.shiftKey) {
       // Maj + flèches : étirer ou resserrer dans un seul sens
@@ -2220,7 +2308,7 @@ initUI();
 setPlaying(true);
 updateHint();
 requestAnimationFrame(frame);
-window.__neon = { onHands, pruneTrackers, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
+window.__neon = { onHands, pruneTrackers, setTrackPaused, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
 </script>
 </body>
 </html>

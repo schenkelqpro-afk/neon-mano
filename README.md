@@ -21,8 +21,10 @@ Déplacer les formes : bouton « Déplacer » (V), puis attraper une forme à la
 
 Instruments et couleurs : chaque trait garde l'instrument choisi au moment où il est dessiné, avec sa couleur (réglable par instrument). L'instrument Batterie joue selon la hauteur : grosse caisse, tom, caisse claire, clap, charleston, charleston ouvert.
 
-Métronome : bouton (T), un clic sur chaque temps, accentué en début de mesure, volume réglable dans Réglages. Il n'apparaît ni dans les vidéos ni dans le WAV.
+Métronome : bouton (T), un clic sur chaque temps, accentué en début de mesure, volume réglable sur un curseur vertical tout à droite de l'écran (visible quand le métronome est actif) ou dans Réglages. Il n'apparaît ni dans les vidéos ni dans le WAV.
 
-Raccourcis : Espace lecture/pause, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles, B bibliothèque, Ctrl/Cmd+S enregistrer la création.
+Pause du suivi : bouton main (H). Plus rien ne s'écrit pendant que tu réfléchis, la musique continue. En reprenant, une main déjà pincée doit d'abord s'ouvrir avant de dessiner.
+
+Raccourcis : Espace lecture/pause, H pause du suivi, T métronome, V déplacer, Début revenir au départ, Z annuler, Suppr tout effacer, R enregistrer, M modèles, B bibliothèque, Ctrl/Cmd+S enregistrer la création.
 
 Tout tourne dans le navigateur : l'image de la caméra n'est envoyée nulle part.
