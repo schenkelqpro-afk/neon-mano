@@ -549,6 +549,15 @@ let previewGuide = false;
 
 const $ = (s) => document.querySelector(s);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+// Clés propres seulement : « toString » ou « __proto__ » ne passent pas pour un instrument ou une gamme
+const own = (o, k) => typeof k === 'string' && Object.prototype.hasOwnProperty.call(o, k);
+const isHex = (c) => typeof c === 'string' && /^#[0-9a-f]{6}$/i.test(c);
+const okPts = (a) => Array.isArray(a) && a.length > 0 && a.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite));
+function cleanColors(obj) {
+  const out = { ...INST_COLORS };
+  if (obj && typeof obj === 'object') for (const k of Object.keys(INST_COLORS)) if (isHex(obj[k])) out[k] = obj[k];
+  return out;
+}
 
 function load() {
   try {
@@ -556,28 +565,48 @@ function load() {
     if (!raw) return;
     const s = JSON.parse(raw);
     for (const k of ['bpm','sound','drums','scale','key','neon','head','showCam','smooth','pinch','libId','unsaved','metro','metroVol','instColors']) if (k in s) state[k] = s[k];
-    if (Array.isArray(s.strokes)) state.strokes = s.strokes.filter(st => Array.isArray(st.pts) && st.pts.length);
+    if (Array.isArray(s.strokes)) state.strokes = s.strokes.filter(st => st && okPts(st.pts)).map(st => {
+      const o = { pts: st.pts, inst: st.inst };
+      if (okPts(st.ctrl)) o.ctrl = st.ctrl;
+      return o;
+    });
     if (!('unsaved' in s)) state.unsaved = state.strokes.length > 0; // dessin d'avant la bibliothèque
-    if (!SOUNDS[state.sound]) state.sound = 'retro';
+    if (!own(SOUNDS, state.sound)) state.sound = 'retro';
     // versions précédentes : une seule couleur et un seul son pour tous les traits
     const hadInst = !!s.instColors;
-    state.instColors = { ...INST_COLORS, ...(s.instColors || {}) };
-    if (!hadInst && s.neon) state.instColors[state.sound] = s.neon;
-    state.strokes.forEach(st => { if (!SOUNDS[st.inst]) st.inst = state.sound; });
-    if (!DRUMS[state.drums]) state.drums = 'off';
-    if (!SCALES[state.scale]) state.scale = 'penta-mineure';
+    state.instColors = cleanColors(s.instColors);
+    if (!hadInst && isHex(s.neon)) state.instColors[state.sound] = s.neon;
+    state.strokes.forEach(st => { if (!own(SOUNDS, st.inst)) st.inst = state.sound; });
+    if (!own(DRUMS, state.drums)) state.drums = 'off';
+    if (!own(SCALES, state.scale)) state.scale = 'penta-mineure';
+    if (!isHex(state.head)) state.head = HEADS[0];
+    if (!isHex(state.neon)) state.neon = state.instColors[state.sound];
+    state.key = clamp(Math.round(Number(state.key)) || 0, 0, 11);
+    state.bpm = clamp(Number(state.bpm) || 100, 50, 180);
+    state.metroVol = clamp(Number(state.metroVol), 0, 100); if (!Number.isFinite(state.metroVol)) state.metroVol = 70;
+    for (const k of ['smooth', 'pinch']) state[k] = [0, 1, 2].includes(state[k]) ? state[k] : 1;
   } catch (e) { /* stockage indisponible : on continue sans */ }
 }
-let saveTimer = 0;
+let saveTimer = 0, saveWarned = false;
+function flushSave() {
+  clearTimeout(saveTimer); saveTimer = 0;
+  const { playing, trackPaused, ...rest } = state;
+  const json = JSON.stringify(rest);
+  const write = () => { localStorage.setItem(STORE_KEY, json); };
+  try { write(); saveWarned = false; return true; }
+  catch (e) {
+    // stockage plein : on fait de la place avec les plus vieux brouillons, puis on réessaie
+    try { if (typeof pruneDrafts === 'function' && pruneDrafts()) { write(); return true; } } catch (e2) { /* toujours plein */ }
+    if (!saveWarned) { saveWarned = true; storageFull(); }
+    return false;
+  }
+}
 function save() {
   clearTimeout(saveTimer);
-  saveTimer = setTimeout(() => {
-    try {
-      const { playing, trackPaused, ...rest } = state;
-      localStorage.setItem(STORE_KEY, JSON.stringify(rest));
-    } catch (e) { /* ignoré */ }
-  }, 300);
+  saveTimer = setTimeout(flushSave, 300);
 }
+addEventListener('pagehide', () => { if (saveTimer) flushSave(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && saveTimer) flushSave(); });
 
 /* ---------------- gamme et notes ---------------- */
 function noteRows() {
@@ -615,7 +644,7 @@ function crossings(pts, xc) {
 function buildScore(strokes) {
   const events = Array.from({ length: STEPS }, () => new Map());
   for (const st of strokes) {
-    const pts = st.pts, inst = SOUNDS[st.inst] ? st.inst : 'retro';
+    const pts = st.pts, inst = own(SOUNDS, st.inst) ? st.inst : 'retro';
     if (inst === 'glide') continue; // traité par buildGlides
     const sets = [];
     let any = false;
@@ -632,13 +661,15 @@ function buildScore(strokes) {
     }
     for (let s = 0; s < STEPS; s++) {
       for (const r of sets[s]) {
-        const held = s > 0 && sets[s - 1].includes(r);
+        let run = 0; // nombre de pas déjà tenus juste avant sur cette ligne
+        while (s - 1 - run >= 0 && sets[s - 1 - run].includes(r)) run++;
+        const held = run > 0;
         if (inst === 'drums') { // batterie : un coup au début, puis un coup par croche tant que le trait dure
           if (held && s % 2) continue;
           events[s].set('drums:' + r, { row: r, len: 1, inst });
           continue;
         }
-        if (held) continue; // note tenue
+        if (held && run % 16 !== 0) continue; // note tenue (on relance la note toutes les 16 doubles-croches)
         let len = 1;
         while (s + len < STEPS && len < 16 && sets[s + len].includes(r)) len++;
         const prev = events[s].get(inst + ':' + r);
@@ -883,7 +914,7 @@ function scheduleStepOn(c, s, t, sc, drums, bpm, vel = 0.9) {
   for (const e of sc[s]) {
     if (e.inst === 'drums') { drumHit(c, drumZone(e.row)[1], t); continue; }
     const m = ROWS[e.row];
-    if (m !== undefined && SOUNDS[e.inst]) SOUNDS[e.inst].play(c, midiFreq(m), t, e.len * sd * 0.92, vel);
+    if (m !== undefined && own(SOUNDS, e.inst)) SOUNDS[e.inst].play(c, midiFreq(m), t, e.len * sd * 0.92, vel);
   }
   const dr = DRUMS[drums];
   if (dr.kick) {
@@ -912,6 +943,11 @@ function scheduler() {
   if (!ac) return;
   if (scoreDirty && performance.now() - lastScoreAt > 70) rescore();
   if (!state.playing || dragPos !== null) return;
+  // après un blocage (onglet en arrière-plan, chargement), on saute les pas manqués au lieu de les jouer d'un coup
+  if (nextTime < ac.currentTime - 0.05) {
+    const missed = Math.ceil((ac.currentTime - nextTime) / stepDur());
+    nextStep = (nextStep + missed) % STEPS; nextTime += missed * stepDur();
+  }
   while (nextTime < ac.currentTime + 0.12) {
     scheduleStepOn(fx, nextStep, nextTime, score, state.drums, state.bpm);
     if (previewGuide && template) scheduleStepOn(fx, nextStep, nextTime, template.score, 'off', state.bpm, 0.55);
@@ -983,9 +1019,25 @@ function setPlaying(p) {
 const active = new Map(); // clé -> { pts }
 function allStrokes() { return active.size ? [...state.strokes, ...active.values()] : state.strokes; }
 function rescore() { ROWS = noteRows(); score = buildScore(allStrokes()); scoreDirty = false; lastScoreAt = performance.now(); }
-function commit(next) {
-  history.push(state.strokes);
+// Chaque étape d'annulation garde aussi la création ouverte à ce moment-là
+function pushHistory() {
+  history.push({ strokes: state.strokes, libId: state.libId });
   if (history.length > 120) history.shift();
+}
+function popHistory() {
+  const h = history.pop();
+  state.strokes = h.strokes;
+  // on revient avant l'ouverture d'une création : ce dessin n'est plus celle-ci, l'enregistrer en créera une nouvelle
+  if (h.libId !== state.libId) state.libId = null;
+  return h;
+}
+// Termine un geste en cours (déplacer, agrandir, tirer un point) avant d'annuler ou d'effacer
+function endGestures() {
+  if (moving) endMove();
+  if (editing && editing.drag) editPointerUp();
+}
+function commit(next) {
+  pushHistory();
   state.strokes = next;
   stringsChanged();
 }
@@ -997,14 +1049,16 @@ function markDirty() {
   save(); updateLibState();
 }
 function undo() {
+  endGestures();
   if (!history.length) { toast('Rien à annuler'); return; }
-  state.strokes = history.pop();
+  popHistory();
   if (editing) { const st = state.strokes[editing.idx]; if (st) { editing.st = st; editing.pi = Math.min(editing.pi, ctrlOf(st).length - 1); } else stopEdit(); }
   stringsChanged();
 }
 function clearAll() {
+  endGestures();
   if (!state.strokes.length) return;
-  protectCurrent();
+  if (!protectCurrent()) return;
   state.libId = null;
   commit([]);
   state.unsaved = false; save(); updateLibState();
@@ -1137,13 +1191,14 @@ function applySettingsUI() {
   if (fx) setDelayTime(fx, state.bpm, ac.currentTime);
 }
 function openTemplate(def) {
+  endGestures(); stopEdit();
+  if (!protectCurrent()) return;
   state.scale = def.scale; state.key = def.key; state.bpm = def.bpm; state.drums = def.drums;
   setBrush(def.sound);
   ROWS = noteRows();
   applySettingsUI();
   const strokes = templateStrokesNorm(def);
   template = { def, strokes, score: buildScore(strokes), samples: sampleGuide(strokes), done: false };
-  protectCurrent();
   state.libId = null;
   if (state.strokes.length) commit([]);
   else stringsChanged();
@@ -1445,6 +1500,11 @@ function drawHands() {
 
 let lastFrame = performance.now();
 function frame(nowMs) {
+  try { drawFrame(nowMs); }
+  catch (e) { console.error(e); layerDirty = true; }
+  requestAnimationFrame(frame); // une erreur de dessin ne doit jamais figer l'écran
+}
+function drawFrame(nowMs) {
   const dt = Math.min(0.05, (nowMs - lastFrame) / 1000); lastFrame = nowMs;
   const t = nowMs / 1000;
   if (!video.requestVideoFrameCallback) detectTick();
@@ -1465,7 +1525,6 @@ function frame(nowMs) {
   drawPlayhead(playheadPos(), t);
   drawSparks(dt);
   drawHands();
-  requestAnimationFrame(frame);
 }
 
 /* ---------------- suivi de la main ---------------- */
@@ -1651,9 +1710,13 @@ function updateHint() {
   $('#hint').hidden = !!(state.strokes.length || template || active.size || state.trackPaused || editing);
 }
 let toastTimer = 0;
-function toast(msg) {
+let toastUntil = 0;
+function toast(msg, ms = 2400) {
+  // un avertissement important (stockage plein) n'est pas remplacé par un message ordinaire
+  if (performance.now() < toastUntil && ms <= 2400) return;
+  if (ms > 2400) toastUntil = performance.now() + ms;
   const el = $('#toast'); el.textContent = msg; el.classList.add('show');
-  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), ms);
 }
 
 /* ---------------- déplacer les formes ---------------- */
@@ -1661,6 +1724,8 @@ let selected = null;     // trait sélectionné (référence)
 let moving = null;       // { key, idx, base, sx, sy }
 function setMode(m) {
   if (editing) stopEdit();
+  if (moving) endMove();
+  for (const h of trackers) h.moving = false;
   state.mode = m;
   $('#btnMove').setAttribute('aria-pressed', String(m === 'move'));
   if (m !== 'move') selected = null;
@@ -1715,10 +1780,10 @@ function scaledPts(base, ax, ay, fx, fy) {
 function beginResize(key, corner) {
   const idx = state.strokes.indexOf(selected);
   if (idx < 0) return false;
-  history.push(state.strokes);
-  if (history.length > 120) history.shift();
+  pushHistory();
   const base = selected.pts, b = boundsOf(base);
   const copy = { ...selected, pts: base.map(p => p.slice()) };
+  const prev = state.strokes, orig = selected;
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
   const baseCtrl = selected.ctrl;
   selected = copy;
@@ -1726,7 +1791,7 @@ function beginResize(key, corner) {
   const ay = corner === 0 || corner === 1 ? b.y1 : b.y0;
   const cx = corner === 0 || corner === 3 ? b.x0 : b.x1;
   const cy = corner === 0 || corner === 1 ? b.y0 : b.y1;
-  moving = { key, idx, base, baseCtrl, resize: true, ax, ay, cx, cy };
+  moving = { key, idx, base, baseCtrl, resize: true, ax, ay, cx, cy, prev, orig, moved: false };
   return true;
 }
 function scaleSelected(fx, fy) {
@@ -1744,18 +1809,19 @@ function beginMove(key, x, y) {
   if (corner >= 0) return beginResize(key, corner);
   const idx = hitStroke(x, y);
   if (idx < 0) { selected = null; return false; }
-  history.push(state.strokes);
-  if (history.length > 120) history.shift();
+  pushHistory();
   const base = state.strokes[idx].pts;
-  const copy = { ...state.strokes[idx], pts: base.map(p => p.slice()) };
+  const prev = state.strokes, orig = state.strokes[idx];
+  const copy = { ...orig, pts: base.map(p => p.slice()) };
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
   selected = copy;
-  moving = { key, idx, base, baseCtrl: state.strokes[idx].ctrl, sx: x, sy: y };
+  moving = { key, idx, base, baseCtrl: orig.ctrl, sx: x, sy: y, prev, orig, moved: false };
   layerDirty = true;
   return true;
 }
 function updateMove(x, y) {
   if (!moving) return;
+  moving.moved = true;
   if (moving.resize) {
     const m = moving, w0 = m.cx - m.ax, h0 = m.cy - m.ay;
     // facteur d'échelle par axe ; une forme presque plate ne s'étire pas dans son axe plat
@@ -1772,7 +1838,14 @@ function updateMove(x, y) {
 }
 function endMove() {
   if (!moving) return;
+  const m = moving;
   moving = null;
+  if (!m.moved) {
+    // simple clic pour sélectionner : pas d'étape d'annulation, la création reste « enregistrée »
+    if (history.length && history[history.length - 1].strokes === m.prev) history.pop();
+    state.strokes = m.prev; selected = m.orig; layerDirty = true;
+    return;
+  }
   stringsChanged();
 }
 function nudge(dxSteps, dyRows) {
@@ -1852,7 +1925,7 @@ function beatLabel(x) {
 function startEdit(idx) {
   const st = state.strokes[idx];
   if (!st) return;
-  if (state.mode === 'move') { state.mode = 'draw'; $('#btnMove').setAttribute('aria-pressed', 'false'); selected = null; }
+  if (state.mode === 'move') setMode('draw');
   editing = { st, idx, pi: -1, drag: null, hover: -1 };
   document.body.classList.add('editing');
   $('#editPill').hidden = editHelpHidden();
@@ -1878,8 +1951,7 @@ function stopEdit() {
 function editableCopy() {
   const idx = state.strokes.indexOf(editing.st);
   if (idx < 0) { stopEdit(); return null; }
-  history.push(state.strokes);
-  if (history.length > 120) history.shift();
+  pushHistory();
   const copy = { ...editing.st, ctrl: ctrlOf(editing.st).map(p => p.slice()) };
   state.strokes = state.strokes.slice(); state.strokes[idx] = copy;
   editing.st = copy; editing.idx = idx;
@@ -2047,7 +2119,7 @@ canvas.addEventListener('pointerdown', (e) => {
   // double-clic sur un trait : édition par points (on retire le « tap » posé par le premier clic)
   if (dbl) {
     if (lastTap && performance.now() - lastTap.t < 700 && state.strokes[state.strokes.length - 1] === lastTap.st && history.length) {
-      state.strokes = history.pop(); stringsChanged();
+      popHistory(); stringsChanged();
     }
     lastTap = null;
     const idx = hitStroke(e.clientX / W, e.clientY / H, 18);
@@ -2076,7 +2148,9 @@ const endPtr = () => {
   if (active.has('ptr')) {
     const n = state.strokes.length; endStroke('ptr');
     const last = state.strokes[state.strokes.length - 1];
-    lastTap = state.strokes.length > n && last.pts.length === 1 ? { t: performance.now(), st: last } : null;
+    let plen = 0;
+    if (state.strokes.length > n) for (let i = 1; i < last.pts.length; i++) plen += Math.hypot((last.pts[i][0] - last.pts[i - 1][0]) * W, (last.pts[i][1] - last.pts[i - 1][1]) * H);
+    lastTap = state.strokes.length > n && plen < 8 ? { t: performance.now(), st: last } : null;
   }
 };
 canvas.addEventListener('contextmenu', (e) => {
@@ -2170,12 +2244,37 @@ function encodeWav(buf) {
 const LIB_KEY = 'neonmano.lib.v1';
 let library = [];
 function loadLib() {
-  try { const v = JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); library = Array.isArray(v) ? v : []; }
+  try { const v = JSON.parse(localStorage.getItem(LIB_KEY) || '[]'); library = Array.isArray(v) ? v.filter(it => it && typeof it === 'object' && Array.isArray(it.strokes)).map(it => ({ ...cleanItem(it), id: String(it.id || newId()) })) : []; }
   catch (e) { library = []; }
 }
-function saveLib() {
-  try { localStorage.setItem(LIB_KEY, JSON.stringify(library)); return true; }
-  catch (e) { toast('Le stockage du navigateur est plein : sauvegarde tout en fichier, puis supprime des créations'); return false; }
+function writeLib() { localStorage.setItem(LIB_KEY, JSON.stringify(library)); }
+// Retire le plus vieux brouillon automatique (jamais une création enregistrée par toi)
+function pruneDrafts(keepId) {
+  for (let i = library.length - 1; i >= 0; i--) {
+    if (library[i].draft && library[i].id !== keepId) {
+      library.splice(i, 1);
+      try { writeLib(); } catch (e) { /* encore plein, la boucle de l'appelant continue */ }
+      prunedDrafts++;
+      return true;
+    }
+  }
+  return false;
+}
+let prunedDrafts = 0;
+function storageFull() {
+  toast('Le stockage du navigateur est plein. Exporte tes créations en fichier, puis supprime-en quelques-unes dans la Bibliothèque.', 8000);
+}
+function saveLib(keepId) {
+  prunedDrafts = 0;
+  for (;;) {
+    try {
+      writeLib();
+      if (prunedDrafts) setTimeout(() => toast(`Place faite : ${prunedDrafts} ancien${prunedDrafts > 1 ? 's brouillons retirés' : ' brouillon retiré'}`, 4000), 2600);
+      return true;
+    } catch (e) {
+      if (!pruneDrafts(keepId)) { storageFull(); return false; }
+    }
+  }
 }
 const pad2 = (n) => String(n).padStart(2, '0');
 function defaultName(prefix = 'Création') {
@@ -2202,40 +2301,53 @@ function saveCreation(asNew) {
   if (!state.strokes.length) { toast('Dessine d’abord quelque chose'); return; }
   const now = Date.now(), typed = $('#libName').value.trim();
   let item = asNew ? null : currentItem();
+  const before = item ? JSON.parse(JSON.stringify(item)) : null;
   if (item) Object.assign(item, snapshot(), { name: typed || item.name, updated: now, draft: false });
   else { item = { id: newId(), name: typed || defaultName(), created: now, updated: now, ...snapshot() }; library.unshift(item); }
-  if (!saveLib()) return;
+  if (!saveLib(item.id)) {
+    // rien n'est perdu : la liste reste identique à ce qui est vraiment sauvegardé
+    if (before) { for (const k of Object.keys(item)) delete item[k]; Object.assign(item, before); }
+    else library = library.filter(x => x !== item);
+    renderLib();
+    return;
+  }
   state.libId = item.id; state.unsaved = false; save();
   renderLib();
   toast(`« ${item.name} » est enregistrée`);
 }
 // Avant d'effacer ou d'ouvrir autre chose : un travail non enregistré part en brouillon.
+// Renvoie false si le brouillon n'a pas pu être sauvegardé : l'appelant ne doit alors rien effacer.
 function protectCurrent() {
-  if (!state.strokes.length || !state.unsaved) return;
+  if (!state.strokes.length || !state.unsaved) return true;
   const now = Date.now();
-  library.unshift({ id: newId(), name: defaultName('Brouillon'), created: now, updated: now, draft: true, ...snapshot() });
-  if (saveLib()) { state.unsaved = false; renderLib(); setTimeout(() => toast('Ton dessin non enregistré est gardé en brouillon dans la Bibliothèque'), 2500); }
+  const draft = { id: newId(), name: defaultName('Brouillon'), created: now, updated: now, draft: true, ...snapshot() };
+  library.unshift(draft);
+  if (saveLib(draft.id)) { state.unsaved = false; renderLib(); setTimeout(() => toast('Ton dessin non enregistré est gardé en brouillon dans la Bibliothèque'), 2500); return true; }
+  library = library.filter(x => x !== draft); renderLib();
+  toast('Stockage plein : ton dessin n’a pas pu être mis de côté, rien n’a été effacé. Enregistre-le en fichier (Exporter) ou supprime des créations.', 8000);
+  return false;
 }
 function openCreation(id) {
   const it = library.find(i => i.id === id);
   if (!it) return;
-  protectCurrent();
+  endGestures(); stopEdit();
+  if (!protectCurrent()) return;
   if (template) closeTemplate();
-  if (SCALES[it.scale]) state.scale = it.scale;
-  if (DRUMS[it.drums]) state.drums = it.drums;
-  state.key = Number(it.key) || 0; state.bpm = clamp(Number(it.bpm) || 100, 50, 180);
+  if (own(SCALES, it.scale)) state.scale = it.scale;
+  if (own(DRUMS, it.drums)) state.drums = it.drums;
+  state.key = clamp(Math.round(Number(it.key)) || 0, 0, 11); state.bpm = clamp(Number(it.bpm) || 100, 50, 180);
   ROWS = noteRows();
   applySettingsUI();
-  const legacy = SOUNDS[it.sound] ? it.sound : 'retro';
-  state.instColors = { ...INST_COLORS, ...(it.instColors || {}) };
-  if (!it.instColors && it.neon) state.instColors[legacy] = it.neon;
+  const legacy = own(SOUNDS, it.sound) ? it.sound : 'retro';
+  state.instColors = cleanColors(it.instColors);
+  if (!it.instColors && isHex(it.neon)) state.instColors[legacy] = it.neon;
   layerDirty = true;
-  if (it.head) setColor('head', it.head);
+  if (isHex(it.head)) setColor('head', it.head);
   setBrush(legacy);
   buildSwatches($('#swHead'), HEADS, 'head');
-  commit(it.strokes.map(st => {
-    const o = { pts: st.pts.map(p => p.slice()), inst: SOUNDS[st.inst] ? st.inst : legacy };
-    if (Array.isArray(st.ctrl) && st.ctrl.length) o.ctrl = st.ctrl.map(p => p.slice());
+  commit(it.strokes.filter(st => st && okPts(st.pts)).map(st => {
+    const o = { pts: st.pts.map(p => p.slice()), inst: own(SOUNDS, st.inst) ? st.inst : legacy };
+    if (okPts(st.ctrl)) o.ctrl = st.ctrl.map(p => p.slice());
     return o;
   }));
   state.libId = it.id; state.unsaved = false; save();
@@ -2251,21 +2363,48 @@ function exportItems(items, fname) {
   download(new Blob([JSON.stringify(data)], { type: 'application/json' }), fname);
 }
 function validItem(it) {
-  return it && Array.isArray(it.strokes) && it.strokes.every(st => Array.isArray(st.pts) && st.pts.every(p => Array.isArray(p) && p.length === 2 && p.every(Number.isFinite)));
+  return !!it && typeof it === 'object' && Array.isArray(it.strokes) && it.strokes.length > 0
+    && it.strokes.every(st => st && okPts(st.pts) && (st.ctrl == null || okPts(st.ctrl)));
+}
+// Création importée ramenée à une forme connue : seuls les champs attendus, avec des valeurs valides
+function cleanItem(it) {
+  const num = (v, d) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  const created = num(it.created, Date.now());
+  const sound = own(SOUNDS, it.sound) ? it.sound : 'retro'; // anciennes créations : un seul son pour tous les traits
+  const o = {
+    id: typeof it.id === 'string' ? it.id.slice(0, 40) : '',
+    name: String(it.name || defaultName()).slice(0, 60),
+    created, updated: num(it.updated, created), draft: it.draft === true,
+    strokes: it.strokes.filter(st => st && okPts(st.pts)).map(st => {
+      const r = { pts: st.pts.map(p => [p[0], p[1]]), inst: own(SOUNDS, st.inst) ? st.inst : sound };
+      if (okPts(st.ctrl)) r.ctrl = st.ctrl.map(p => [p[0], p[1]]);
+      return r;
+    }),
+    instColors: cleanColors(it.instColors),
+    sound,
+    scale: own(SCALES, it.scale) ? it.scale : 'penta-mineure',
+    key: clamp(Math.round(num(it.key, 0)), 0, 11),
+    bpm: clamp(num(it.bpm, 100), 50, 180),
+    drums: own(DRUMS, it.drums) ? it.drums : 'off',
+  };
+  if (isHex(it.neon)) o.neon = it.neon;
+  if (isHex(it.head)) o.head = it.head;
+  if (!it.instColors && o.neon) o.instColors[o.sound] = o.neon;
+  return o;
 }
 async function importFile(file) {
   try {
     const data = JSON.parse(await file.text());
     const items = (Array.isArray(data.items) ? data.items : [data]).filter(validItem);
     if (!items.length) throw new Error('vide');
-    const ids = new Set(library.map(i => i.id));
+    const ids = new Set(library.map(i => i.id)), added = [];
     for (const it of items.reverse()) {
-      const copy = { ...it, name: String(it.name || defaultName()).slice(0, 60) };
+      const copy = cleanItem(it);
       if (!copy.id || ids.has(copy.id)) copy.id = newId();
-      copy.created = copy.created || Date.now(); copy.updated = copy.updated || copy.created;
-      library.unshift(copy); ids.add(copy.id);
+      library.unshift(copy); ids.add(copy.id); added.push(copy);
     }
     if (saveLib()) { renderLib(); toast(`${items.length} création${items.length > 1 ? 's importées' : ' importée'}`); }
+    else { library = library.filter(x => !added.includes(x)); renderLib(); }
   } catch (e) {
     toast('Ce fichier n’est pas une création Néon Mano');
   }
@@ -2307,7 +2446,7 @@ function renderLib() {
     const nameEl = txt.querySelector('b');
     nameEl.textContent = it.name;
     if (it.draft) { const d = document.createElement('span'); d.className = 'draft'; d.textContent = 'brouillon'; nameEl.appendChild(d); }
-    const used = [...new Set(it.strokes.map(st => st.inst || it.sound))].filter(k => SOUNDS[k]).map(k => SOUNDS[k].label);
+    const used = [...new Set(it.strokes.map(st => st.inst || it.sound))].filter(k => own(SOUNDS, k)).map(k => SOUNDS[k].label);
     txt.querySelectorAll('small')[0].textContent = `${used.join(' + ') || SOUNDS.retro.label} · ${it.bpm} BPM`;
     txt.querySelectorAll('small')[1].textContent = fmtDate(it.updated || it.created);
     b.append(cv, txt);
@@ -2379,6 +2518,7 @@ function buildSwatches(box, list, keyName) {
   render();
 }
 function setColor(keyName, c) {
+  if (!isHex(c)) return;
   state[keyName] = c;
   if (keyName === 'neon') { state.instColors[state.sound] = c; layerDirty = true; }
   document.documentElement.style.setProperty(keyName === 'neon' ? '--neon' : '--head', c);
@@ -2386,7 +2526,7 @@ function setColor(keyName, c) {
 }
 // Instrument du prochain trait (et sa couleur)
 function setBrush(inst) {
-  if (!SOUNDS[inst]) inst = 'retro';
+  if (!own(SOUNDS, inst)) inst = 'retro';
   state.sound = inst;
   state.neon = instColor(inst);
   document.documentElement.style.setProperty('--neon', state.neon);
@@ -2447,7 +2587,7 @@ function initUI() {
   setColor('head', state.head);
   setBrush(state.sound);
   buildSwatches($('#swHead'), HEADS, 'head');
-  bindSeg('#segSmooth', 'smooth', () => trackers.length = 0);
+  bindSeg('#segSmooth', 'smooth', () => releaseHands());
   bindSeg('#segPinch', 'pinch');
   bindSeg('#segCam', 'showCam');
   buildTemplateList();
@@ -2547,13 +2687,14 @@ function initUI() {
     if ((e.metaKey || e.ctrlKey) && k === 's') { e.preventDefault(); saveCreation(false); return; }
     if (editing) {
       if (e.key === 'Escape' || e.key === 'Enter') { e.preventDefault(); stopEdit(); return; }
-      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); if (editing.pi >= 0) removePoint(editing.pi); else toast('Clique d’abord sur un point'); return; }
+      if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); endGestures(); if (editing.pi >= 0) removePoint(editing.pi); else toast('Clique d’abord sur un point'); return; }
       if (e.key.startsWith('Arrow')) {
-        e.preventDefault();
+        e.preventDefault(); endGestures();
         const d = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, 1], ArrowDown: [0, -1] }[e.key];
         nudgePoint(d[0], d[1]); return;
       }
     }
+    if (e.key === 'Delete' || e.key === 'Backspace' || e.key.startsWith('Arrow') || e.key === '+' || e.key === '-') endGestures();
     if (e.code === 'Space') { e.preventDefault(); initAudio(); setPlaying(!state.playing); }
     else if (k === 'z' || ((e.metaKey || e.ctrlKey) && k === 'z')) { e.preventDefault(); undo(); }
     else if ((e.key === 'Delete' || e.key === 'Backspace') && state.mode === 'move' && selected && state.strokes.includes(selected)) {
@@ -2594,7 +2735,7 @@ function initUI() {
       console.error(err);
       const denied = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
       const msg = denied
-        ? 'La caméra a été refusée. Autorise-la dans la barre d’adresse de Chrome, puis recharge la page. Tu peux aussi jouer à la souris.'
+        ? 'La caméra a été refusée. Autorise-la dans la barre d’adresse de Chrome, puis recharge la page. Sur Mac, vérifie aussi Réglages Système > Confidentialité et sécurité > Caméra > Google Chrome. Tu peux aussi jouer à la souris.'
         : (camReady ? 'Le suivi de la main n’a pas pu se charger (connexion internet ?). Tu peux jouer à la souris en attendant.'
                     : 'Impossible d’ouvrir la caméra. Vérifie qu’aucune autre app ne l’utilise. Tu peux aussi jouer à la souris.');
       $('#introErr').textContent = msg; $('#introErr').hidden = false;
@@ -2617,7 +2758,7 @@ initUI();
 setPlaying(true);
 updateHint();
 requestAnimationFrame(frame);
-window.__neon = { onHands, pruneTrackers, setTrackPaused, startEdit, stopEdit, curveFrom, get editing() { return editing; }, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
+window.__neon = { onHands, pruneTrackers, setTrackPaused, undo, commit, saveCreation, openCreation, clearAll, validItem, cleanItem, get library() { return library; }, set library(v) { library = v; }, get history() { return history; }, pos: playheadPos, seekTo, get libId() { return state.libId; }, startEdit, stopEdit, curveFrom, get editing() { return editing; }, state, buildScore, get score() { return score; }, openTemplate: (i) => openTemplate(TEMPLATES[i]), TEMPLATES, trackers, get landmarker() { return landmarker; } };
 </script>
 </body>
 </html>
